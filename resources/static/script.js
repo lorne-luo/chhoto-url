@@ -9,6 +9,9 @@ let SUBDIR = null;
 let ADMIN = false;
 let LOCAL_DATA = [];
 let CUR_PAGE = 0;
+let ADS_DATA = [];
+let ACTIVE_TAB = "links";
+let EDITING_AD_ID = null;
 
 // Flags
 let PROCESSING_PAGE_TRANSITION = true;
@@ -99,6 +102,8 @@ const refreshData = async () => {
   try {
     const loading_text = document.getElementById("loading-text");
     const admin_button = document.getElementById("admin-button");
+    const adsTab = document.getElementById("ads-tab");
+    const adsSection = document.getElementById("ads-section");
     if (!ADMIN) {
       const res = await fetch(prepSubdir("/api/whoami"), { cache: "no-cache" });
       if (res.status == 200) {
@@ -121,10 +126,20 @@ const refreshData = async () => {
             admin_button.innerText = "login";
             admin_button.hidden = false;
             updateInputBox();
+            if (adsTab) {
+              adsTab.hidden = true;
+            }
+            if (adsSection) {
+              adsSection.hidden = true;
+            }
+            ACTIVE_TAB = "links";
             break;
           case "admin":
             ADMIN = true;
             await getConfig();
+            if (adsTab) {
+              adsTab.hidden = false;
+            }
             break;
           default:
             throw Error("Got undefined user role.");
@@ -155,11 +170,22 @@ const refreshData = async () => {
         displayData();
       }
       managePageControls();
+      if (ACTIVE_TAB === "ads") {
+        await refreshAds();
+      }
     } else {
       document.getElementById("table-box").hidden = true;
       loading_text.hidden = false;
       document.getElementById("url-table").innerHTML = "";
+      if (adsTab) {
+        adsTab.hidden = true;
+      }
+      if (adsSection) {
+        adsSection.hidden = true;
+      }
+      ACTIVE_TAB = "links";
     }
+    await switchTab(ACTIVE_TAB);
   } catch (err) {
     console.log(err);
     if (!alert("Something went wrong! Click Ok to refresh page.")) {
@@ -257,8 +283,8 @@ const managePageControls = () => {
   PROCESSING_PAGE_TRANSITION = false;
 };
 
-const showAlert = (text, col) => {
-  const alertBox = document.getElementById("alert-box");
+const showAlert = (text, col, targetId = "alert-box") => {
+  const alertBox = document.getElementById(targetId);
   alertBox.style.background = col;
   alertBox.innerHTML = text;
   if (text == "&nbsp;") {
@@ -276,8 +302,11 @@ const refreshExpiryTimes = async () => {
     let relativeTime = formatRelativeTime(expiryTimeParsed);
     if (relativeTime == "expired") {
       td.style.color = "light-dark(red, #a01e1e)";
-      for (const btn of td.parentElement.lastChild.querySelectorAll("button")) {
-        btn.disabled = true;
+      const disableButtons = td.getAttribute("data-disable-expired") !== "false";
+      if (disableButtons) {
+        for (const btn of td.parentElement.lastChild.querySelectorAll("button")) {
+          btn.disabled = true;
+        }
       }
     }
     let div = td.firstChild;
@@ -349,6 +378,7 @@ const TR = (i, row) => {
     expiryTD.width = "160px";
     expiryTD.setAttribute("data-time", expiryTime);
     expiryTD.classList.add("tooltip");
+    expiryTD.setAttribute("data-disable-expired", "true");
   }
   expiryTD.setAttribute("label", "Expiry");
   expiryTD.setAttribute("name", "expiryColumn");
@@ -522,6 +552,328 @@ const deleteButton = (shortUrl) => {
   return btn;
 };
 
+const showAdsAlert = (text, col) => {
+  showAlert(text, col, "ads-alert-box");
+};
+
+const setExpirySelectValue = (select, expiryTime) => {
+  if (!select) {
+    return;
+  }
+  if (!expiryTime || expiryTime <= 0) {
+    select.value = "0";
+    return;
+  }
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const remaining = Math.max(expiryTime - nowSeconds, 0);
+  const options = Array.from(select.options).map((opt) => parseInt(opt.value));
+  const match = options.find((opt) => opt === remaining);
+  select.value = match ? String(match) : "0";
+};
+
+const switchTab = async (tab) => {
+  ACTIVE_TAB = tab;
+  const linksTab = document.getElementById("links-tab");
+  const adsTab = document.getElementById("ads-tab");
+  const linksSection = document.getElementById("links-section");
+  const adsSection = document.getElementById("ads-section");
+  if (linksTab) {
+    linksTab.classList.toggle("pure-button-primary", tab === "links");
+  }
+  if (adsTab) {
+    adsTab.classList.toggle("pure-button-primary", tab === "ads");
+  }
+  if (linksSection) {
+    linksSection.hidden = tab !== "links";
+  }
+  if (adsSection) {
+    adsSection.hidden = tab !== "ads";
+  }
+  if (tab === "ads") {
+    if (!ADMIN) {
+      showLogin();
+      ACTIVE_TAB = "links";
+      if (linksSection) {
+        linksSection.hidden = false;
+      }
+      if (linksTab) {
+        linksTab.classList.add("pure-button-primary");
+      }
+      if (adsTab) {
+        adsTab.classList.remove("pure-button-primary");
+      }
+      return;
+    }
+    await refreshAds();
+  } else {
+    displayData();
+  }
+};
+
+const collectAdPayload = (ids) => {
+  const payload = {
+    name: document.getElementById(ids.name).value.trim(),
+    image_url: document.getElementById(ids.image).value.trim(),
+    ad_link: document.getElementById(ids.link).value.trim(),
+    expiry_delay: parseInt(document.getElementById(ids.expiry).value),
+  };
+  const countdownValue = document.getElementById(ids.countdown).value;
+  if (countdownValue !== "") {
+    payload.countdown_seconds = parseInt(countdownValue);
+  }
+  return payload;
+};
+
+const refreshAds = async () => {
+  const loadingText = document.getElementById("ads-loading-text");
+  const tableBox = document.getElementById("ads-table-box");
+  if (loadingText) {
+    loadingText.hidden = false;
+    loadingText.innerHTML = "Loading ads...";
+  }
+  if (tableBox) {
+    tableBox.hidden = true;
+  }
+  try {
+    const res = await fetch(prepSubdir("/api/ads"), { cache: "no-cache" });
+    if (res.status === 401) {
+      showLogin();
+      return;
+    }
+    if (!res.ok) {
+      throw new Error("Unable to fetch ads.");
+    }
+    ADS_DATA = await res.json();
+    displayAds();
+  } catch (err) {
+    console.log("Error while loading ads:", err);
+    showAdsAlert(
+      "Unable to load ads. Please try again!",
+      "light-dark(red, #a01e1e)",
+    );
+  }
+};
+
+const displayAds = () => {
+  const loadingText = document.getElementById("ads-loading-text");
+  const tableBox = document.getElementById("ads-table-box");
+  const table = document.getElementById("ads-table-body");
+  if (!table) {
+    return;
+  }
+  if (ADS_DATA.length === 0) {
+    if (tableBox) {
+      tableBox.hidden = true;
+    }
+    if (loadingText) {
+      loadingText.hidden = false;
+      loadingText.innerHTML = "No ads found.";
+    }
+    table.innerHTML = "";
+    return;
+  }
+  if (loadingText) {
+    loadingText.hidden = true;
+  }
+  if (tableBox) {
+    tableBox.hidden = false;
+  }
+  table.innerHTML = "";
+  ADS_DATA.forEach((ad, index) => {
+    table.appendChild(AD_TR(index + 1, ad));
+  });
+  setTimeout(refreshExpiryTimes, 1000);
+};
+
+const AD_TR = (i, ad) => {
+  const tr = document.createElement("tr");
+  const numTD = TD(i, null);
+  numTD.setAttribute("name", "numColumn");
+
+  const nameTD = TD(ad.name, "Name");
+  const imageTD = TD(A_LONG(ad.image_url), "Image URL");
+  const linkTD = TD(A_LONG(ad.ad_link), "Ad Link");
+
+  const countdownTD = TD(ad.countdown_seconds, "Countdown (s)");
+  countdownTD.setAttribute("name", "hitsColumn");
+
+  const expiryTime = ad.expiry_time;
+  let expiryHTML = "-";
+  if (expiryTime > 0) {
+    const expiryTimeParsed = new Date(expiryTime * 1000);
+    const relativeExpiryTime = formatRelativeTime(expiryTimeParsed);
+    const accurateExpiryTime = expiryTimeParsed.toLocaleString();
+    expiryHTML =
+      relativeExpiryTime +
+      '<span class="tooltiptext">' +
+      accurateExpiryTime +
+      "</span>";
+  }
+  const expiryTD = TD(expiryHTML, "Expiry");
+  expiryTD.setAttribute("name", "expiryColumn");
+  if (expiryTime > 0) {
+    expiryTD.width = "160px";
+    expiryTD.setAttribute("data-time", expiryTime);
+    expiryTD.classList.add("tooltip");
+    expiryTD.setAttribute("data-disable-expired", "false");
+  }
+
+  const actionsTD = document.createElement("td");
+  actionsTD.setAttribute("name", "actions");
+  actionsTD.setAttribute("label", "Actions");
+  const btnGrp = document.createElement("div");
+  btnGrp.classList.add("pure-button-group");
+  btnGrp.role = "group";
+  const editBtn = document.createElement("button");
+  editBtn.classList.add("svg-button");
+  editBtn.innerHTML = SVG_EDIT_BUTTON;
+  editBtn.title = "Edit Ad";
+  editBtn.onclick = () => {
+    openAdEdit(ad);
+  };
+  const delBtn = document.createElement("button");
+  delBtn.classList.add("svg-button");
+  delBtn.innerHTML = SVG_DELETE_BUTTON;
+  delBtn.title = "Delete Ad";
+  delBtn.onclick = (e) => {
+    e.preventDefault();
+    deleteAdById(ad.id);
+  };
+  btnGrp.appendChild(editBtn);
+  btnGrp.appendChild(delBtn);
+  actionsTD.appendChild(btnGrp);
+
+  for (const td of [numTD, nameTD, imageTD, linkTD, countdownTD, expiryTD, actionsTD]) {
+    tr.appendChild(td);
+  }
+  return tr;
+};
+
+const submitAdForm = () => {
+  const payload = collectAdPayload({
+    name: "adName",
+    image: "adImageUrl",
+    link: "adLinkUrl",
+    expiry: "adExpiryDelay",
+    countdown: "adCountdownSeconds",
+  });
+
+  fetch(prepSubdir("/api/ads"), {
+    method: "POST",
+    cache: "no-cache",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+    .then(async (res) => {
+      const text = await res.text();
+      if (!res.ok) {
+        showAdsAlert(text, "light-dark(red, #a01e1e)");
+        return;
+      }
+      const ad = JSON.parse(text);
+      ADS_DATA.push(ad);
+      ADS_DATA.sort((a, b) => a.id - b.id);
+      displayAds();
+      document.forms.namedItem("ad-form").reset();
+      document.getElementById("adCountdownSeconds").value = 5;
+      showAdsAlert("Ad saved!", "light-dark(green, #1e501e)");
+    })
+    .catch((err) => {
+      console.log("Error:", err);
+      showAdsAlert(
+        "Unable to save ad. Please try again!",
+        "light-dark(red, #a01e1e)",
+      );
+    });
+};
+
+const openAdEdit = (ad) => {
+  EDITING_AD_ID = ad.id;
+  document.getElementById("edit-ad-name-preview").textContent = ad.name;
+  document.getElementById("edit-ad-name").value = ad.name;
+  document.getElementById("edit-ad-image-url").value = ad.image_url;
+  document.getElementById("edit-ad-link-url").value = ad.ad_link;
+  setExpirySelectValue(
+    document.getElementById("edit-ad-expiry-delay"),
+    ad.expiry_time,
+  );
+  document.getElementById("edit-ad-countdown").value = ad.countdown_seconds;
+  document.getElementById("container").style.filter = "blur(2px)";
+  document.getElementById("ad-edit-dialog").showModal();
+};
+
+const submitAdEdit = () => {
+  if (!EDITING_AD_ID) {
+    return;
+  }
+  const payload = collectAdPayload({
+    name: "edit-ad-name",
+    image: "edit-ad-image-url",
+    link: "edit-ad-link-url",
+    expiry: "edit-ad-expiry-delay",
+    countdown: "edit-ad-countdown",
+  });
+  fetch(prepSubdir(`/api/ads/${EDITING_AD_ID}`), {
+    method: "PUT",
+    cache: "no-cache",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+    .then(async (res) => {
+      const text = await res.text();
+      if (!res.ok) {
+        showAdsAlert(text, "light-dark(red, #a01e1e)");
+        return;
+      }
+      const updated = JSON.parse(text);
+      ADS_DATA = ADS_DATA.map((item) =>
+        item.id === updated.id ? updated : item,
+      );
+      displayAds();
+      document.getElementById("ad-edit-dialog").close();
+      document.getElementById("container").style.filter = "blur(0px)";
+      showAdsAlert("Ad updated.", "light-dark(green, #1e501e)");
+      EDITING_AD_ID = null;
+    })
+    .catch((err) => {
+      console.log("Error:", err);
+      showAdsAlert(
+        "Unable to update ad. Please try again!",
+        "light-dark(red, #a01e1e)",
+      );
+    });
+};
+
+const deleteAdById = (id) => {
+  if (!confirm("Do you want to delete this ad?")) {
+    return;
+  }
+  showAdsAlert("&nbsp;", "transparent");
+  fetch(prepSubdir(`/api/ads/${id}`), {
+    method: "DELETE",
+    cache: "no-cache",
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text);
+      }
+      ADS_DATA = ADS_DATA.filter((item) => item.id !== id);
+      displayAds();
+    })
+    .catch((err) => {
+      console.log("Error:", err);
+      showAdsAlert(
+        "Unable to delete ad. Please try again!",
+        "light-dark(red, #a01e1e)",
+      );
+    });
+};
+
 const submitForm = () => {
   const form = document.forms.namedItem("new-url-form");
   const longUrl = form.elements["longUrl"];
@@ -678,6 +1030,8 @@ const logOut = async () => {
           ADMIN = false;
           VERSION = null;
           LOCAL_DATA = [];
+          ADS_DATA = [];
+          ACTIVE_TAB = "links";
           await refreshData();
         } else {
           showAlert(
@@ -704,10 +1058,40 @@ refreshData()
     document.getElementById("edited-url").onblur = () => {
       addHTTPSToLongURL("edited-url");
     };
+    document.getElementById("adLinkUrl").onblur = () => {
+      addHTTPSToLongURL("adLinkUrl");
+    };
+    document.getElementById("adImageUrl").onblur = () => {
+      addHTTPSToLongURL("adImageUrl");
+    };
+    document.getElementById("edit-ad-link-url").onblur = () => {
+      addHTTPSToLongURL("edit-ad-link-url");
+    };
+    document.getElementById("edit-ad-image-url").onblur = () => {
+      addHTTPSToLongURL("edit-ad-image-url");
+    };
     const form = document.forms.namedItem("new-url-form");
     form.onsubmit = (e) => {
       e.preventDefault();
       submitForm();
+    };
+
+    document.forms.namedItem("ad-form").onsubmit = (e) => {
+      e.preventDefault();
+      submitAdForm();
+    };
+    document.getElementById("adCountdownSeconds").value = 5;
+
+    const adEditDialog = document.getElementById("ad-edit-dialog");
+    adEditDialog.onclose = () => {
+      document.getElementById("container").style.filter = "blur(0px)";
+    };
+    document.forms.namedItem("ad-edit-form").onsubmit = (e) => {
+      e.preventDefault();
+      submitAdEdit();
+    };
+    document.getElementById("ad-edit-cancel-button").onclick = () => {
+      adEditDialog.close();
     };
 
     document.getElementById("admin-button").onclick = (e) => {
@@ -717,6 +1101,15 @@ refreshData()
       } else {
         showLogin();
       }
+    };
+
+    document.getElementById("links-tab").onclick = async (e) => {
+      e.preventDefault();
+      await switchTab("links");
+    };
+    document.getElementById("ads-tab").onclick = async (e) => {
+      e.preventDefault();
+      await switchTab("ads");
     };
 
     const editDialog = document.getElementById("edit-dialog");

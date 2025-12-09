@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Sayantan Santra <sayantan.santra689@gmail.com>
 // SPDX-License-Identifier: MIT
 
+use chrono::Utc;
 use log::error;
 use nanoid::nanoid;
 use rand::seq::IndexedRandom;
@@ -10,7 +11,7 @@ use serde::Deserialize;
 
 use crate::{
     config::Config,
-    database,
+    database::{self, AdRow},
     services::{
         ChhotoError::{self, ClientError, ServerError},
         GetReqParams,
@@ -33,6 +34,17 @@ struct EditURLRequest {
     shortlink: String,
     longlink: String,
     reset_hits: bool,
+}
+
+#[derive(Deserialize)]
+struct AdRequest {
+    name: String,
+    image_url: String,
+    ad_link: String,
+    #[serde(default)]
+    expiry_delay: i64,
+    #[serde(default)]
+    countdown_seconds: Option<i64>,
 }
 
 // Only have a-z, 0-9, - and _ as valid characters in a shortlink
@@ -169,6 +181,100 @@ pub fn delete_link(
             reason: "The shortlink is invalid.".to_string(),
         })
     }
+}
+
+pub fn create_ad(req: &str, db: &Connection) -> Result<AdRow, ChhotoError> {
+    let chunks: AdRequest =
+        serde_json::from_str(req).map_err(|_| ClientError {
+            reason: "Invalid request!".to_string(),
+        })?;
+
+    let validated = validate_ad_payload(chunks)?;
+    database::insert_ad(
+        &validated.name,
+        &validated.image_url,
+        &validated.ad_link,
+        validated.expiry_time,
+        validated.countdown_seconds,
+        db,
+    )
+}
+
+pub fn edit_ad(id: i64, req: &str, db: &Connection) -> Result<AdRow, ChhotoError> {
+    if id <= 0 {
+        return Err(ClientError {
+            reason: "Invalid ad id.".to_string(),
+        });
+    }
+    let chunks: AdRequest =
+        serde_json::from_str(req).map_err(|_| ClientError {
+            reason: "Invalid request!".to_string(),
+        })?;
+
+    let validated = validate_ad_payload(chunks)?;
+    database::update_ad(
+        id,
+        &validated.name,
+        &validated.image_url,
+        &validated.ad_link,
+        validated.expiry_time,
+        validated.countdown_seconds,
+        db,
+    )
+}
+
+struct ValidatedAd {
+    name: String,
+    image_url: String,
+    ad_link: String,
+    expiry_time: i64,
+    countdown_seconds: i64,
+}
+
+fn validate_ad_payload(chunks: AdRequest) -> Result<ValidatedAd, ChhotoError> {
+    let name = chunks.name.trim().to_string();
+    if name.is_empty() {
+        return Err(ClientError {
+            reason: "Ad name is required.".to_string(),
+        });
+    }
+    let image_url = chunks.image_url.trim().to_string();
+    if image_url.is_empty() {
+        return Err(ClientError {
+            reason: "Image URL is required.".to_string(),
+        });
+    }
+    let ad_link = chunks.ad_link.trim().to_string();
+    if ad_link.is_empty() {
+        return Err(ClientError {
+            reason: "Ad link is required.".to_string(),
+        });
+    }
+
+    let mut expiry_delay = chunks.expiry_delay;
+    expiry_delay = expiry_delay.max(0);
+    // keep max at ~5 years for parity with links
+    expiry_delay = expiry_delay.min(157_784_760);
+    let expiry_time = if expiry_delay == 0 {
+        0
+    } else {
+        Utc::now().timestamp() + expiry_delay
+    };
+
+    let countdown_seconds = chunks.countdown_seconds.unwrap_or(5);
+    if !(0..=30).contains(&countdown_seconds) {
+        return Err(ClientError {
+            reason: "Countdown must be between 0 and 30 seconds.".to_string(),
+        });
+    }
+
+    Ok(ValidatedAd {
+        name,
+        image_url,
+        ad_link,
+        expiry_time,
+        countdown_seconds,
+    })
 }
 
 // Generate a random link using either adjective-name pair (default) of a slug or a-z, 0-9

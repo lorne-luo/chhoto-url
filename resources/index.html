@@ -68,92 +68,175 @@
 
   <body>
     <div class="container" id="container">
-      <form class="pure-form pure-form-aligned" name="new-url-form">
-        <fieldset>
-          <legend id="logo">
-            <img src="assets/favicon.svg" alt="chhoto-url-logo" /> Chhoto URL
-          </legend>
-          <div class="pure-control-group">
-            <label for="longUrl">Long URL</label>
-            <input
-              class="chhoto-input"
-              type="url"
-              name="longUrl"
-              id="longUrl"
-              placeholder="Please enter a valid URL"
-              required
-            />
-          </div>
-          <div class="pure-control-group">
-            <label for="shortUrl">Short URL (optional)</label>
-            <input
-              class="chhoto-input"
-              type="text"
-              name="shortUrl"
-              id="shortUrl"
-              placeholder="Only a-z, 0-9, - and _ are allowed"
-              pattern="[a-z0-9\-_]+"
-              title="Only a-z, 0-9, - and _ are allowed"
-              autocapitalize="off"
-            />
-          </div>
-          <div class="pure-control-group">
-            <label for="expiryDelay">Expiry</label>
-            <select class="chhoto-select" name="expiryDelay" id="expiryDelay">
-              <option value="0">Never</option>
-              <option value="600">10 Minutes</option>
-              <option value="1800">30 Minutes</option>
-              <option value="3600">1 Hour</option>
-              <option value="43200">12 Hours</option>
-              <option value="86400">1 Day</option>
-              <option value="604800">1 Week</option>
-              <option value="2592000">1 Month</option>
-              <option value="7776000">3 Months</option>
-              <option value="15552000">6 Months</option>
-              <option value="31536000">1 Year</option>
-            </select>
-          </div>
-          <div class="pure-controls" id="controls">
-            <button class="chhoto-button pure-button pure-button-primary">
-              Shorten!
-            </button>
-            <div id="alert-box">&nbsp;</div>
-          </div>
-        </fieldset>
-      </form>
+      <div id="admin-tabs" class="pure-button-group" role="group">
+        <button
+          class="chhoto-button pure-button pure-button-primary"
+          id="links-tab"
+        >
+          Links
+        </button>
+        <button class="pure-button" id="ads-tab" hidden>Ads</button>
+      </div>
 
-      <p id="loading-text">Loading links table...</p>
-      <table class="chhoto-table pure-table" id="table-box" hidden>
-        <caption>
-          <span>Active links</span>
-          <span id="pageControls" hidden="true">
-            <button
-              id="prevPageBtn"
-              class="svg-button"
-              title="Previous Page"
-            ></button>
-            <button
-              id="nextPageBtn"
-              class="svg-button"
-              title="Next Page"
-            ></button>
-          </span>
-        </caption>
-        <br />
-        <thead>
-          <tr>
-            <th name="numColumn">#</th>
-            <th id="short-url-header">Short URL</th>
-            <th>Long URL</th>
-            <th name="hitsColumn">Hits</th>
-            <th name="expiryColumn">Expiry</th>
-            <th name="actions">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="url-table">
-          <!-- The links would be inserted here -->
-        </tbody>
-      </table>
+      <div id="links-section">
+        <form class="pure-form pure-form-aligned" name="new-url-form">
+          <fieldset>
+            <legend id="logo">
+              <img src="assets/favicon.svg" alt="chhoto-url-logo" /> Chhoto URL
+            </legend>
+            <div class="pure-control-group">
+              <label for="longUrl">Long URL</label>
+              <input
+                class="chhoto-input"
+                type="url"
+                name="longUrl"
+                id="longUrl"
+                placeholder="Please enter a valid URL"
+                required
+              />
+            </div>
+            <div class="pure-control-group">
+              <label for="shortUrl">Short URL (optional)</label>
+              <input
+                class="chhoto-input"
+                type="text"
+                name="shortUrl"
+                id="shortUrl"
+                placeholder="Only a-z, 0-9, - and _ are allowed"
+                pattern="[a-z0-9\-_]+"
+                title="Only a-z, 0-9, - and _ are allowed"
+                autocapitalize="off"
+              />
+            </div>
+            <div class="pure-control-group">
+              <label for="expiryDelay">Expiry</label>
+              <select class="chhoto-select" name="expiryDelay" id="expiryDelay">
+                <option value="0">Never</option>
+                <option value="600">10 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
+                <option value="43200">12 Hours</option>
+                <option value="86400">1 Day</option>
+                <option value="604800">1 Week</option>
+                <option value="2592000">1 Month</option>
+                <option value="7776000">3 Months</option>
+                <option value="15552000">6 Months</option>
+                <option value="31536000">1 Year</option>
+              </select>
+            </div>
+            <div class="pure-controls" id="controls">
+              <button class="chhoto-button pure-button pure-button-primary">
+                Shorten!
+              </button>
+              <div id="alert-box">&nbsp;</div>
+            </div>
+          </fieldset>
+        </form>
+
+        <p id="loading-text">Loading links table...</p>
+        <table class="chhoto-table pure-table" id="table-box" hidden>
+          <caption>
+            <span>Active links</span>
+            <span id="pageControls" hidden="true">
+              <button
+                id="prevPageBtn"
+                class="svg-button"
+                title="Previous Page"
+              ></button>
+              <button
+                id="nextPageBtn"
+                class="svg-button"
+                title="Next Page"
+              ></button>
+            </span>
+          </caption>
+          <br />
+          <thead>
+            <tr>
+              <th name="numColumn">#</th>
+              <th id="short-url-header">Short URL</th>
+              <th>Long URL</th>
+              <th name="hitsColumn">Hits</th>
+              <th name="expiryColumn">Expiry</th>
+              <th name="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="url-table">
+            <!-- The links would be inserted here -->
+          </tbody>
+        </table>
+      </div>
+
+      <div id="ads-section" hidden>
+        <form class="pure-form pure-form-aligned" name="ad-form">
+          <fieldset>
+            <legend>Ads</legend>
+            <div class="pure-control-group">
+              <label for="adName">Name</label>
+              <input class="chhoto-input" type="text" name="adName" id="adName" required />
+            </div>
+            <div class="pure-control-group">
+              <label for="adImageUrl">Image URL</label>
+              <input class="chhoto-input" type="text" name="adImageUrl" id="adImageUrl" required />
+            </div>
+            <div class="pure-control-group">
+              <label for="adLinkUrl">Ad Link</label>
+              <input class="chhoto-input" type="text" name="adLinkUrl" id="adLinkUrl" required />
+            </div>
+            <div class="pure-control-group">
+              <label for="adExpiryDelay">Expiry</label>
+              <select class="chhoto-select" name="adExpiryDelay" id="adExpiryDelay">
+                <option value="0">Never</option>
+                <option value="600">10 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
+                <option value="43200">12 Hours</option>
+                <option value="86400">1 Day</option>
+                <option value="604800">1 Week</option>
+                <option value="2592000">1 Month</option>
+                <option value="7776000">3 Months</option>
+                <option value="15552000">6 Months</option>
+                <option value="31536000">1 Year</option>
+              </select>
+            </div>
+            <div class="pure-control-group">
+              <label for="adCountdownSeconds">Countdown (seconds)</label>
+              <input
+                class="chhoto-input"
+                type="number"
+                min="0"
+                max="30"
+                step="1"
+                name="adCountdownSeconds"
+                id="adCountdownSeconds"
+                value="5"
+              />
+            </div>
+            <div class="pure-controls" id="ads-controls">
+              <button class="chhoto-button pure-button pure-button-primary">
+                Save Ad
+              </button>
+              <div id="ads-alert-box">&nbsp;</div>
+            </div>
+          </fieldset>
+        </form>
+        <p id="ads-loading-text" hidden>Loading ads...</p>
+        <table class="chhoto-table pure-table" id="ads-table-box" hidden>
+          <caption>Ads</caption>
+          <thead>
+            <tr>
+              <th name="numColumn">#</th>
+              <th>Name</th>
+              <th>Image URL</th>
+              <th>Ad Link</th>
+              <th name="hitsColumn">Countdown (s)</th>
+              <th name="expiryColumn">Expiry</th>
+              <th name="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="ads-table-body"></tbody>
+        </table>
+      </div>
     </div>
 
     <div name="links-div">
@@ -218,6 +301,55 @@
           >
             Submit
           </button>
+        </fieldset>
+      </form>
+    </dialog>
+
+    <dialog id="ad-edit-dialog">
+      <form class="pure-form pure-form-stacked" name="ad-edit-form">
+        <p>Edit ad <span id="edit-ad-name-preview">placeholder</span>.</p>
+        <fieldset>
+          <label for="edit-ad-name">Name</label>
+          <input class="chhoto-input" type="text" id="edit-ad-name" />
+          <label for="edit-ad-image-url">Image URL</label>
+          <input class="chhoto-input" type="text" id="edit-ad-image-url" />
+          <label for="edit-ad-link-url">Ad Link</label>
+          <input class="chhoto-input" type="text" id="edit-ad-link-url" />
+          <label for="edit-ad-expiry-delay">Expiry</label>
+          <select class="chhoto-select" id="edit-ad-expiry-delay">
+            <option value="0">Never</option>
+            <option value="600">10 Minutes</option>
+            <option value="1800">30 Minutes</option>
+            <option value="3600">1 Hour</option>
+            <option value="43200">12 Hours</option>
+            <option value="86400">1 Day</option>
+            <option value="604800">1 Week</option>
+            <option value="2592000">1 Month</option>
+            <option value="7776000">3 Months</option>
+            <option value="15552000">6 Months</option>
+            <option value="31536000">1 Year</option>
+          </select>
+          <label for="edit-ad-countdown">Countdown (seconds)</label>
+          <input
+            class="chhoto-input"
+            type="number"
+            min="0"
+            max="30"
+            step="1"
+            id="edit-ad-countdown"
+          />
+          <div class="pure-button-group">
+            <button
+              class="chhoto-button pure-button"
+              id="ad-edit-cancel-button"
+              type="button"
+            >
+              Cancel
+            </button>
+            <button class="chhoto-button pure-button pure-button-primary" value="default">
+              Save
+            </button>
+          </div>
         </fieldset>
       </form>
     </dialog>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 use log::{error, info};
-use rusqlite::{fallible_iterator::FallibleIterator, Connection};
+use rusqlite::{fallible_iterator::FallibleIterator, Connection, ErrorCode};
 use serde::Serialize;
 use std::rc::Rc;
 
@@ -15,6 +15,16 @@ pub struct DBRow {
     longlink: String,
     hits: i64,
     expiry_time: i64,
+}
+
+#[derive(Serialize)]
+pub struct AdRow {
+    pub id: i64,
+    pub name: String,
+    pub image_url: String,
+    pub ad_link: String,
+    pub expiry_time: i64,
+    pub countdown_seconds: i64,
 }
 
 // Find a single URL for /api/expand
@@ -249,9 +259,181 @@ pub fn delete_link(shortlink: &str, db: &Connection) -> Result<(), ChhotoError> 
     }
 }
 
+pub fn list_ads(db: &Connection) -> Rc<[AdRow]> {
+    let Ok(mut statement) = db.prepare_cached(
+        "SELECT id, name, image_url, ad_link, expiry_time, countdown_seconds
+         FROM ads
+         ORDER BY id ASC",
+    ) else {
+        error!("Error preparing SQL statement for list_ads.");
+        return [].into();
+    };
+
+    let Ok(data) = statement.query([]) else {
+        error!("Error running SQL statement for list_ads.");
+        return [].into();
+    };
+
+    data.map(|row| {
+        Ok(AdRow {
+            id: row.get("id")?,
+            name: row.get("name")?,
+            image_url: row.get("image_url")?,
+            ad_link: row.get("ad_link")?,
+            expiry_time: row.get("expiry_time")?,
+            countdown_seconds: row.get("countdown_seconds")?,
+        })
+    })
+    .collect()
+    .unwrap_or_else(|err| {
+        error!("Error processing fetched ads rows: {err}");
+        [].into()
+    })
+}
+
+pub fn list_active_ads(db: &Connection) -> Rc<[AdRow]> {
+    let now = chrono::Utc::now().timestamp();
+    let Ok(mut statement) = db.prepare_cached(
+        "SELECT id, name, image_url, ad_link, expiry_time, countdown_seconds
+         FROM ads
+         WHERE expiry_time = 0 OR expiry_time > ?1
+         ORDER BY id ASC",
+    ) else {
+        error!("Error preparing SQL statement for list_active_ads.");
+        return [].into();
+    };
+
+    let Ok(data) = statement.query([now]) else {
+        error!("Error running SQL statement for list_active_ads.");
+        return [].into();
+    };
+
+    data.map(|row| {
+        Ok(AdRow {
+            id: row.get("id")?,
+            name: row.get("name")?,
+            image_url: row.get("image_url")?,
+            ad_link: row.get("ad_link")?,
+            expiry_time: row.get("expiry_time")?,
+            countdown_seconds: row.get("countdown_seconds")?,
+        })
+    })
+    .collect()
+    .unwrap_or_else(|err| {
+        error!("Error processing fetched active ads rows: {err}");
+        [].into()
+    })
+}
+
+pub fn insert_ad(
+    name: &str,
+    image_url: &str,
+    ad_link: &str,
+    expiry_time: i64,
+    countdown_seconds: i64,
+    db: &Connection,
+) -> Result<AdRow, ChhotoError> {
+    let Ok(mut statement) = db.prepare_cached(
+        "INSERT INTO ads (name, image_url, ad_link, expiry_time, countdown_seconds)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(name) DO NOTHING",
+    ) else {
+        error!("Error preparing SQL statement for insert_ad.");
+        return Err(ServerError);
+    };
+
+    match statement.execute((name, image_url, ad_link, expiry_time, countdown_seconds)) {
+        Ok(1) => {
+            let id = db.last_insert_rowid();
+            Ok(AdRow {
+                id,
+                name: name.to_string(),
+                image_url: image_url.to_string(),
+                ad_link: ad_link.to_string(),
+                expiry_time,
+                countdown_seconds,
+            })
+        }
+        Ok(_) => Err(ClientError {
+            reason: "Ad name is already in use!".to_string(),
+        }),
+        Err(err) => {
+            error!(
+                "There was some error while adding ad ({name}, {image_url}, {ad_link}): {err}"
+            );
+            Err(ServerError)
+        }
+    }
+}
+
+pub fn update_ad(
+    id: i64,
+    name: &str,
+    image_url: &str,
+    ad_link: &str,
+    expiry_time: i64,
+    countdown_seconds: i64,
+    db: &Connection,
+) -> Result<AdRow, ChhotoError> {
+    let Ok(mut statement) = db.prepare_cached(
+        "UPDATE ads
+         SET name = ?1,
+             image_url = ?2,
+             ad_link = ?3,
+             expiry_time = ?4,
+             countdown_seconds = ?5
+         WHERE id = ?6",
+    ) else {
+        error!("Error preparing SQL statement for update_ad.");
+        return Err(ServerError);
+    };
+
+    match statement.execute((name, image_url, ad_link, expiry_time, countdown_seconds, id)) {
+        Ok(1) => Ok(AdRow {
+            id,
+            name: name.to_string(),
+            image_url: image_url.to_string(),
+            ad_link: ad_link.to_string(),
+            expiry_time,
+            countdown_seconds,
+        }),
+        Ok(_) => Err(ClientError {
+            reason: "The ad was not found, and could not be edited.".to_string(),
+        }),
+        Err(err) => {
+            if err.sqlite_error_code() == Some(ErrorCode::ConstraintViolation) {
+                return Err(ClientError {
+                    reason: "Ad name is already in use!".to_string(),
+                });
+            }
+            error!(
+                "There was some error while updating ad ({name}, {image_url}, {ad_link}): {err}"
+            );
+            Err(ServerError)
+        }
+    }
+}
+
+pub fn delete_ad(id: i64, db: &Connection) -> Result<(), ChhotoError> {
+    let Ok(mut statement) = db.prepare_cached("DELETE FROM ads WHERE id = ?1") else {
+        error!("Error preparing SQL statement for delete_ad.");
+        return Err(ServerError);
+    };
+    match statement.execute([id]) {
+        Ok(delta) if delta > 0 => Ok(()),
+        Ok(_) => Err(ClientError {
+            reason: "The ad was not found, and could not be deleted.".to_string(),
+        }),
+        Err(err) => {
+            error!("There was some error while deleting ad ({id}): {err}");
+            Err(ServerError)
+        }
+    }
+}
+
 pub fn open_db(path: &str, use_wal_mode: bool, ensure_acid: bool) -> Connection {
     // Set current user_version. Should be incremented on change of schema.
-    let user_version = 1;
+    let user_version = 2;
 
     let db = Connection::open(path).expect("Unable to open database!");
 
@@ -310,6 +492,32 @@ pub fn open_db(path: &str, use_wal_mode: bool, ensure_acid: bool) -> Connection 
         [],
     )
     .expect("Unable to create index on expiry_time.");
+
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS ads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            image_url TEXT NOT NULL,
+            ad_link TEXT NOT NULL,
+            expiry_time INTEGER NOT NULL DEFAULT 0,
+            countdown_seconds INTEGER NOT NULL DEFAULT 5,
+            CONSTRAINT ads_name_unique UNIQUE (name)
+        )",
+        [],
+    )
+    .expect("Unable to initialize ads table.");
+
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ads_name ON ads (name)",
+        [],
+    )
+    .expect("Unable to create index on ads name.");
+
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ads_expiry_time ON ads (expiry_time)",
+        [],
+    )
+    .expect("Unable to create index on ads expiry_time.");
 
     // Set the user version
     db.pragma_update(None, "user_version", user_version)

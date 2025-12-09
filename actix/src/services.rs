@@ -479,3 +479,148 @@ pub async fn delete_link(
         HttpResponse::Unauthorized().body("Not logged in!")
     }
 }
+
+#[get("/api/ads")]
+pub async fn list_ads(
+    data: web::Data<AppState>,
+    session: Session,
+    http: HttpRequest,
+) -> HttpResponse {
+    let config = &data.config;
+    let result = auth::is_api_ok(http, config);
+    if result.success || is_session_valid(session, config) {
+        HttpResponse::Ok().json(database::list_ads(&data.db))
+    } else if result.error {
+        HttpResponse::Unauthorized().json(result)
+    } else {
+        HttpResponse::Unauthorized().body("Not logged in!")
+    }
+}
+
+#[get("/api/ads/selectable")]
+pub async fn list_active_ads(
+    data: web::Data<AppState>,
+    session: Session,
+    http: HttpRequest,
+) -> HttpResponse {
+    let config = &data.config;
+    let result = auth::is_api_ok(http, config);
+    if result.success || is_session_valid(session, config) {
+        HttpResponse::Ok().json(database::list_active_ads(&data.db))
+    } else if result.error {
+        HttpResponse::Unauthorized().json(result)
+    } else {
+        HttpResponse::Unauthorized().body("Not logged in!")
+    }
+}
+
+#[post("/api/ads")]
+pub async fn create_ad(
+    req: String,
+    data: web::Data<AppState>,
+    session: Session,
+    http: HttpRequest,
+) -> HttpResponse {
+    let config = &data.config;
+    let result = auth::is_api_ok(http, config);
+    if result.success || is_session_valid(session, config) {
+        match utils::create_ad(&req, &data.db) {
+            Ok(ad) => HttpResponse::Created().json(ad),
+            Err(ServerError) => HttpResponse::InternalServerError().json(JSONResponse {
+                success: false,
+                error: true,
+                reason: "Something went wrong when adding the ad.".to_string(),
+            }),
+            Err(ClientError { reason }) => {
+                let status = if reason.contains("already in use") {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                HttpResponse::build(status).json(JSONResponse {
+                    success: false,
+                    error: true,
+                    reason,
+                })
+            }
+        }
+    } else if result.error {
+        HttpResponse::Unauthorized().json(result)
+    } else {
+        HttpResponse::Unauthorized().body("Not logged in!")
+    }
+}
+
+#[put("/api/ads/{id}")]
+pub async fn update_ad(
+    ad_id: web::Path<i64>,
+    req: String,
+    data: web::Data<AppState>,
+    session: Session,
+    http: HttpRequest,
+) -> HttpResponse {
+    let config = &data.config;
+    let result = auth::is_api_ok(http, config);
+    if result.success || is_session_valid(session, config) {
+        match utils::edit_ad(*ad_id, &req, &data.db) {
+            Ok(ad) => HttpResponse::Ok().json(ad),
+            Err(ServerError) => HttpResponse::InternalServerError().json(JSONResponse {
+                success: false,
+                error: true,
+                reason: "Something went wrong when editing the ad.".to_string(),
+            }),
+            Err(ClientError { reason }) => {
+                let status = if reason.contains("not found") {
+                    StatusCode::NOT_FOUND
+                } else if reason.contains("already in use") {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                HttpResponse::build(status).json(JSONResponse {
+                    success: false,
+                    error: true,
+                    reason,
+                })
+            }
+        }
+    } else if result.error {
+        HttpResponse::Unauthorized().json(result)
+    } else {
+        HttpResponse::Unauthorized().body("Not logged in!")
+    }
+}
+
+#[delete("/api/ads/{id}")]
+pub async fn delete_ad(
+    ad_id: web::Path<i64>,
+    data: web::Data<AppState>,
+    session: Session,
+    http: HttpRequest,
+) -> HttpResponse {
+    let config = &data.config;
+    let result = auth::is_api_ok(http, config);
+    if result.success || is_session_valid(session, config) {
+        match database::delete_ad(*ad_id, &data.db) {
+            Ok(()) => HttpResponse::Ok().json(JSONResponse {
+                success: true,
+                error: false,
+                reason: format!("Deleted ad {ad_id}"),
+            }),
+            Err(ServerError) => HttpResponse::InternalServerError().json(JSONResponse {
+                success: false,
+                error: true,
+                reason: "Something went wrong when deleting the ad.".to_string(),
+            }),
+            Err(ClientError { reason }) => HttpResponse::NotFound().json(JSONResponse {
+                success: false,
+                error: true,
+                reason,
+            }),
+        }
+    } else if result.error {
+        HttpResponse::Unauthorized().json(result)
+    } else {
+        HttpResponse::Unauthorized().body("Not logged in!")
+    }
+}

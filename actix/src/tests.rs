@@ -43,6 +43,26 @@ struct BackendConfig {
     slug_length: usize,
 }
 
+#[derive(Deserialize, Clone)]
+struct AdData {
+    id: i64,
+    name: String,
+    image_url: String,
+    ad_link: String,
+    expiry_time: i64,
+    countdown_seconds: i64,
+}
+
+#[derive(Deserialize)]
+struct GenericResponse {
+    #[serde(default)]
+    success: bool,
+    #[serde(default)]
+    error: bool,
+    #[serde(default)]
+    reason: String,
+}
+
 fn default_config(test: &str) -> config::Config {
     let conf = config::Config {
     listen_address: String::from("0.0.0.0"),
@@ -91,6 +111,11 @@ async fn create_app(
             .service(services::link_handler)
             .service(services::edit_link)
             .service(services::delete_link)
+            .service(services::list_ads)
+            .service(services::list_active_ads)
+            .service(services::create_ad)
+            .service(services::update_ad)
+            .service(services::delete_ad)
             .service(services::whoami)
             .service(services::expand),
     )
@@ -148,6 +173,100 @@ async fn edit_link<T: Service<Request, Response = ServiceResponse, Error = Error
         .to_request();
     let resp = test::call_service(&app, req).await;
     resp.status()
+}
+
+async fn add_ad<T: Service<Request, Response = ServiceResponse, Error = Error>>(
+    app: T,
+    api_key: &str,
+    name: &str,
+    countdown_seconds: Option<i64>,
+    expiry_delay: i64,
+) -> (StatusCode, String) {
+    let countdown = countdown_seconds
+        .map(|c| format!(",\"countdown_seconds\":{c}"))
+        .unwrap_or_default();
+    let req = test::TestRequest::post()
+        .uri("/api/ads")
+        .insert_header(("X-API-Key", api_key))
+        .set_payload(format!(
+            "{{\"name\":\"{name}\",\"image_url\":\"https://img/{name}.png\",\"ad_link\":\"https://dest/{name}\",\"expiry_delay\":{expiry_delay}{countdown}}}"
+        ))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    let body = to_bytes(resp.into_body()).await.unwrap();
+    (status, body.as_str().to_string())
+}
+
+async fn update_ad<T: Service<Request, Response = ServiceResponse, Error = Error>>(
+    app: T,
+    api_key: &str,
+    id: i64,
+    name: &str,
+    countdown_seconds: Option<i64>,
+    expiry_delay: i64,
+) -> (StatusCode, String) {
+    let countdown = countdown_seconds
+        .map(|c| format!(",\"countdown_seconds\":{c}"))
+        .unwrap_or_default();
+    let req = test::TestRequest::put()
+        .uri(format!("/api/ads/{id}").as_str())
+        .insert_header(("X-API-Key", api_key))
+        .set_payload(format!(
+            "{{\"name\":\"{name}\",\"image_url\":\"https://img/{name}.png\",\"ad_link\":\"https://dest/{name}\",\"expiry_delay\":{expiry_delay}{countdown}}}"
+        ))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    let body = to_bytes(resp.into_body()).await.unwrap();
+    (status, body.as_str().to_string())
+}
+
+async fn fetch_ads<T: Service<Request, Response = ServiceResponse, Error = Error>>(
+    app: T,
+    api_key: &str,
+) -> (StatusCode, Vec<AdData>) {
+    let req = test::TestRequest::get()
+        .uri("/api/ads")
+        .insert_header(("X-API-Key", api_key))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    let body = to_bytes(resp.into_body()).await.unwrap();
+    let ads: Vec<AdData> = serde_json::from_str(body.as_str()).unwrap();
+    (status, ads)
+}
+
+async fn fetch_active_ads<T: Service<Request, Response = ServiceResponse, Error = Error>>(
+    app: T,
+    api_key: &str,
+) -> (StatusCode, Vec<AdData>) {
+    let req = test::TestRequest::get()
+        .uri("/api/ads/selectable")
+        .insert_header(("X-API-Key", api_key))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    let body = to_bytes(resp.into_body()).await.unwrap();
+    let ads: Vec<AdData> = serde_json::from_str(body.as_str()).unwrap();
+    (status, ads)
+}
+
+async fn delete_ad_entry<T: Service<Request, Response = ServiceResponse, Error = Error>>(
+    app: T,
+    api_key: &str,
+    id: i64,
+) -> (StatusCode, String) {
+    let req = test::TestRequest::delete()
+        .uri(format!("/api/ads/{id}").as_str())
+        .insert_header(("X-API-Key", api_key))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    let body = to_bytes(resp.into_body()).await.unwrap();
+    (status, body.as_str().to_string())
 }
 
 //
@@ -511,6 +630,110 @@ async fn link_editing() {
     sleep(one_second);
     let status = edit_link(&app, &api_key, "test2", true).await;
     assert!(status.is_client_error());
+
+    let _ = fs::remove_file(format!("/tmp/chhoto-url-test-{test}.sqlite"));
+}
+
+#[test]
+async fn ads_crud_and_unique_validation() {
+    let test = "ads-crud";
+    let conf = default_config(test);
+    let app = create_app(&conf, test).await;
+    let api_key = conf.api_key.clone().unwrap();
+
+    let (status, body) = add_ad(&app, &api_key, "banner-one", Some(10), 0).await;
+    assert!(status.is_success());
+    let ad_one: AdData = serde_json::from_str(&body).unwrap();
+    assert_eq!(ad_one.countdown_seconds, 10);
+
+    let (status, body) = add_ad(&app, &api_key, "banner-two", None, 3600).await;
+    assert!(status.is_success());
+    let ad_two: AdData = serde_json::from_str(&body).unwrap();
+    assert_eq!(ad_two.countdown_seconds, 5);
+
+    let (list_status, ads) = fetch_ads(&app, &api_key).await;
+    assert!(list_status.is_success());
+    assert_eq!(ads.len(), 2);
+
+    let (update_status, body) =
+        update_ad(&app, &api_key, ad_one.id, "banner-one-new", Some(0), 0).await;
+    assert!(update_status.is_success());
+    let updated: AdData = serde_json::from_str(&body).unwrap();
+    assert_eq!(updated.name, "banner-one-new");
+    assert_eq!(updated.countdown_seconds, 0);
+
+    let (conflict_status, conflict_body) =
+        add_ad(&app, &api_key, "banner-one-new", Some(5), 0).await;
+    assert_eq!(conflict_status, StatusCode::CONFLICT);
+    let conflict_reason: GenericResponse = serde_json::from_str(&conflict_body).unwrap();
+    assert!(conflict_reason.reason.contains("already in use"));
+
+    let (delete_status, _) = delete_ad_entry(&app, &api_key, ad_two.id).await;
+    assert!(delete_status.is_success());
+    let (list_status, ads_after) = fetch_ads(&app, &api_key).await;
+    assert!(list_status.is_success());
+    assert_eq!(ads_after.len(), 1);
+    assert_eq!(ads_after[0].name, "banner-one-new");
+
+    let _ = fs::remove_file(format!("/tmp/chhoto-url-test-{test}.sqlite"));
+}
+
+#[test]
+async fn ads_countdown_validation() {
+    let test = "ads-countdown";
+    let conf = default_config(test);
+    let app = create_app(&conf, test).await;
+    let api_key = conf.api_key.clone().unwrap();
+
+    let (bad_status, bad_body) = add_ad(&app, &api_key, "too-high", Some(31), 0).await;
+    assert_eq!(bad_status, StatusCode::BAD_REQUEST);
+    let bad_reason: GenericResponse = serde_json::from_str(&bad_body).unwrap();
+    assert!(bad_reason.reason.contains("Countdown"));
+
+    let (negative_status, negative_body) =
+        add_ad(&app, &api_key, "negative", Some(-1), 0).await;
+    assert_eq!(negative_status, StatusCode::BAD_REQUEST);
+    let negative_reason: GenericResponse = serde_json::from_str(&negative_body).unwrap();
+    assert!(negative_reason.reason.contains("Countdown"));
+
+    let (missing_status, missing_body) = add_ad(&app, &api_key, "", Some(5), 0).await;
+    assert_eq!(missing_status, StatusCode::BAD_REQUEST);
+    let missing_reason: GenericResponse = serde_json::from_str(&missing_body).unwrap();
+    assert!(missing_reason.reason.contains("required"));
+
+    let _ = fs::remove_file(format!("/tmp/chhoto-url-test-{test}.sqlite"));
+}
+
+#[test]
+async fn ads_expiry_filtering() {
+    let test = "ads-expiry";
+    let conf = default_config(test);
+    let app = create_app(&conf, test).await;
+    let api_key = conf.api_key.clone().unwrap();
+
+    let (status, active_body) = add_ad(&app, &api_key, "active", Some(5), 5).await;
+    assert!(status.is_success());
+    let active: AdData = serde_json::from_str(&active_body).unwrap();
+
+    let (status, expiring_body) = add_ad(&app, &api_key, "short-lived", Some(5), 1).await;
+    assert!(status.is_success());
+    let expiring: AdData = serde_json::from_str(&expiring_body).unwrap();
+
+    let (list_status, ads) = fetch_ads(&app, &api_key).await;
+    assert!(list_status.is_success());
+    assert_eq!(ads.len(), 2);
+
+    sleep(Duration::from_secs(2));
+
+    let (all_status, ads_after) = fetch_ads(&app, &api_key).await;
+    assert!(all_status.is_success());
+    assert_eq!(ads_after.len(), 2);
+    assert!(ads_after.iter().any(|ad| ad.id == expiring.id));
+
+    let (active_status, active_ads) = fetch_active_ads(&app, &api_key).await;
+    assert!(active_status.is_success());
+    assert_eq!(active_ads.len(), 1);
+    assert_eq!(active_ads[0].id, active.id);
 
     let _ = fs::remove_file(format!("/tmp/chhoto-url-test-{test}.sqlite"));
 }
