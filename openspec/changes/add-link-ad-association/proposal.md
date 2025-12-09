@@ -4,7 +4,7 @@
 After creating a shared ads catalog, links need to reference an ad (optionally) in preparation for interstitial behavior.
 
 ## What Changes
-- Extend links model/DB to store optional `ad_id` referencing catalog ads.
+- Extend links model/DBRow to store optional `ad_id` referencing catalog ads.
 - Update link create/edit/list APIs and admin UI to set/view ad association.
 
 ## Impact

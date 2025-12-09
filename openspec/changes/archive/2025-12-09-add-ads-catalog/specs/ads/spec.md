@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 ### Requirement: Ads catalog
 The system SHALL provide an ads catalog stored in the database with reusable ads records.
 

@@ -10,10 +10,6 @@ Short links SHALL support an optional association to one catalog ad.
 - **WHEN** an admin creates or edits a link and selects a valid ad
 - **THEN** the link SHALL persist the association and expose it via list/detail APIs.
 
-#### Scenario: Invalid ad rejected
-- **WHEN** an admin attempts to create or edit a link with an ad that is missing or inactive
-- **THEN** the request SHALL be rejected with validation errors.
-
 #### Scenario: Ads delete
 - **WHEN** an ad is delete
 - **THEN** reset DBRow.ad_id whice got this id to None
