@@ -63,6 +63,7 @@ const formatAdLabel = (adId) => {
   return `Ad #${adId}`;
 };
 
+
 const renderAdSelectOptions = (select, currentValue = null) => {
   if (!select) {
     return;
@@ -432,7 +433,7 @@ const TR = (i, row) => {
   const longTD = TD(A_LONG(longlink), "Long URL");
 
   const shortlink = row["shortlink"];
-  tr.id = shortlink;
+  tr.id = `link-${shortlink}`;
   const shortTD = TD(A_SHORT(shortlink), "Short URL");
   shortTD.setAttribute("name", "shortColumn");
 
@@ -668,9 +669,11 @@ const switchTab = async (tab) => {
   const adsSection = document.getElementById("ads-section");
   if (linksTab) {
     linksTab.classList.toggle("pure-button-primary", tab === "links");
+    linksTab.classList.toggle("chhoto-button", tab === "links");
   }
   if (adsTab) {
     adsTab.classList.toggle("pure-button-primary", tab === "ads");
+    adsTab.classList.toggle("chhoto-button", tab === "ads");
   }
   if (linksSection) {
     linksSection.hidden = tab !== "links";
@@ -687,9 +690,11 @@ const switchTab = async (tab) => {
       }
       if (linksTab) {
         linksTab.classList.add("pure-button-primary");
+        linksTab.classList.add("chhoto-button");
       }
       if (adsTab) {
         adsTab.classList.remove("pure-button-primary");
+        adsTab.classList.remove("chhoto-button");
       }
       return;
     }
@@ -777,6 +782,7 @@ const displayAds = () => {
 
 const AD_TR = (i, ad) => {
   const tr = document.createElement("tr");
+  tr.id = `ad-${ad.id}`;
   const numTD = TD(i, null);
   numTD.setAttribute("name", "numColumn");
 
