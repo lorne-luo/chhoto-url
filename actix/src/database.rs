@@ -15,6 +15,7 @@ pub struct DBRow {
     longlink: String,
     hits: i64,
     expiry_time: i64,
+    ad_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -28,10 +29,13 @@ pub struct AdRow {
 }
 
 // Find a single URL for /api/expand
-pub fn find_url(shortlink: &str, db: &Connection) -> Result<(String, i64, i64), ChhotoError> {
-    // Long link, hits, expiry time
+pub fn find_url(
+    shortlink: &str,
+    db: &Connection,
+) -> Result<(String, i64, i64, Option<i64>), ChhotoError> {
+    // Long link, hits, expiry time, ad_id
     let now = chrono::Utc::now().timestamp();
-    let query = "SELECT long_url, hits, expiry_time FROM urls
+    let query = "SELECT long_url, hits, expiry_time, ad_id FROM urls
                  WHERE short_url = ?1 
                  AND (expiry_time = 0 OR expiry_time > ?2)";
     let Ok(mut statement) = db.prepare_cached(query) else {
@@ -44,6 +48,7 @@ pub fn find_url(shortlink: &str, db: &Connection) -> Result<(String, i64, i64), 
                 row.get("long_url")?,
                 row.get("hits")?,
                 row.get("expiry_time")?,
+                row.get("ad_id")?,
             ))
         })
         .map_err(|_| ChhotoError::ClientError {
@@ -60,26 +65,26 @@ pub fn getall(
 ) -> Rc<[DBRow]> {
     let now = chrono::Utc::now().timestamp();
     let query = if page_after.is_some() {
-        "SELECT short_url, long_url, hits, expiry_time FROM (
-            SELECT t.id, t.short_url, t.long_url, t.hits, t.expiry_time FROM urls AS t 
+        "SELECT short_url, long_url, hits, expiry_time, ad_id FROM (
+            SELECT t.id, t.short_url, t.long_url, t.hits, t.expiry_time, t.ad_id FROM urls AS t 
             JOIN urls AS u ON u.short_url = ?1 
             WHERE t.id < u.id AND (t.expiry_time = 0 OR t.expiry_time > ?2) 
             ORDER BY t.id DESC LIMIT ?3
          ) ORDER BY id ASC"
     } else if page_no.is_some() {
-        "SELECT short_url, long_url, hits, expiry_time FROM (
-            SELECT id, short_url, long_url, hits, expiry_time FROM urls 
+        "SELECT short_url, long_url, hits, expiry_time, ad_id FROM (
+            SELECT id, short_url, long_url, hits, expiry_time, ad_id FROM urls 
             WHERE expiry_time= 0 OR expiry_time > ?1 
             ORDER BY id DESC LIMIT ?2 OFFSET ?3
          ) ORDER BY id ASC"
     } else if page_size.is_some() {
-        "SELECT short_url, long_url, hits, expiry_time FROM (
-            SELECT id, short_url, long_url, hits, expiry_time FROM urls
+        "SELECT short_url, long_url, hits, expiry_time, ad_id FROM (
+            SELECT id, short_url, long_url, hits, expiry_time, ad_id FROM urls
             WHERE expiry_time = 0 OR expiry_time > ?1 
             ORDER BY id DESC LIMIT ?2
          ) ORDER BY id ASC"
     } else {
-        "SELECT short_url, long_url, hits, expiry_time
+        "SELECT short_url, long_url, hits, expiry_time, ad_id
          FROM urls WHERE expiry_time = 0 OR expiry_time > ?1 
          ORDER BY id ASC"
     };
@@ -112,6 +117,7 @@ pub fn getall(
                 longlink: row.get("long_url")?,
                 hits: row.get("hits")?,
                 expiry_time: row.get("expiry_time")?,
+                ad_id: row.get("ad_id")?,
             })
         })
         .collect()
@@ -145,6 +151,7 @@ pub fn add_link(
     shortlink: &str,
     longlink: &str,
     expiry_delay: i64,
+    ad_id: Option<i64>,
     db: &Connection,
 ) -> Result<i64, ChhotoError> {
     let now = chrono::Utc::now().timestamp();
@@ -156,16 +163,16 @@ pub fn add_link(
 
     let Ok(mut statement) = db.prepare_cached(
         "INSERT INTO urls
-             (long_url, short_url, hits, expiry_time)
-             VALUES (?1, ?2, 0, ?3)
+             (long_url, short_url, hits, expiry_time, ad_id)
+             VALUES (?1, ?2, 0, ?3, ?4)
              ON CONFLICT(short_url) DO UPDATE 
-             SET long_url = ?1, hits = 0, expiry_time = ?3 
-             WHERE short_url = ?2 AND expiry_time <= ?4 AND expiry_time > 0",
+             SET long_url = ?1, hits = 0, expiry_time = ?3, ad_id = ?4
+             WHERE short_url = ?2 AND expiry_time <= ?5 AND expiry_time > 0",
     ) else {
         error!("Error preparing SQL statement for add_link.");
         return Err(ServerError);
     };
-    match statement.execute((longlink, shortlink, expiry_time, now)) {
+    match statement.execute((longlink, shortlink, expiry_time, ad_id, now)) {
         Ok(1) => Ok(expiry_time),
         Ok(_) => Err(ClientError {
             reason: "Short URL is already in use!".to_string(),
@@ -182,25 +189,60 @@ pub fn edit_link(
     shortlink: &str,
     longlink: &str,
     reset_hits: bool,
+    ad_id: Option<Option<i64>>,
     db: &Connection,
 ) -> Result<usize, ()> {
     let now = chrono::Utc::now().timestamp();
-    let query = if reset_hits {
-        "UPDATE urls 
-         SET long_url = ?1, hits = 0 
-         WHERE short_url = ?2 AND (expiry_time = 0 OR expiry_time > ?3)"
-    } else {
-        "UPDATE urls 
-         SET long_url = ?1 
-         WHERE short_url = ?2 AND (expiry_time = 0 OR expiry_time > ?3)"
-    };
-    let Ok(mut statement) = db.prepare_cached(query) else {
-        error!("Error preparing SQL statement for edit_link.");
-        return Err(());
+    let result = match (reset_hits, ad_id) {
+        (true, Some(ad)) => {
+            let Ok(mut statement) = db.prepare_cached(
+                "UPDATE urls 
+                 SET long_url = ?1, hits = 0, ad_id = ?2
+                 WHERE short_url = ?3 AND (expiry_time = 0 OR expiry_time > ?4)",
+            ) else {
+                error!("Error preparing SQL statement for edit_link with ad update.");
+                return Err(());
+            };
+            statement.execute((longlink, ad, shortlink, now))
+        }
+        (false, Some(ad)) => {
+            let Ok(mut statement) = db.prepare_cached(
+                "UPDATE urls 
+                 SET long_url = ?1, ad_id = ?2
+                 WHERE short_url = ?3 AND (expiry_time = 0 OR expiry_time > ?4)",
+            ) else {
+                error!("Error preparing SQL statement for edit_link with ad update.");
+                return Err(());
+            };
+            statement.execute((longlink, ad, shortlink, now))
+        }
+        (true, None) => {
+            let Ok(mut statement) = db.prepare_cached(
+                "UPDATE urls 
+                 SET long_url = ?1, hits = 0 
+                 WHERE short_url = ?2 AND (expiry_time = 0 OR expiry_time > ?3)",
+            ) else {
+                error!("Error preparing SQL statement for edit_link.");
+                return Err(());
+            };
+
+            statement.execute((longlink, shortlink, now))
+        }
+        (false, None) => {
+            let Ok(mut statement) = db.prepare_cached(
+                "UPDATE urls 
+                 SET long_url = ?1 
+                 WHERE short_url = ?2 AND (expiry_time = 0 OR expiry_time > ?3)",
+            ) else {
+                error!("Error preparing SQL statement for edit_link.");
+                return Err(());
+            };
+
+            statement.execute((longlink, shortlink, now))
+        }
     };
 
-    statement
-        .execute((longlink, shortlink, now))
+    result
         .inspect_err(|err| {
             error!(
                 "Got an error while editing link ({shortlink}, {longlink}, {reset_hits}): {err}"
@@ -325,6 +367,35 @@ pub fn list_active_ads(db: &Connection) -> Rc<[AdRow]> {
     })
 }
 
+pub fn ad_exists(id: i64, db: &Connection) -> bool {
+    let Ok(mut statement) = db.prepare_cached("SELECT 1 FROM ads WHERE id = ?1 LIMIT 1") else {
+        error!("Error preparing SQL statement for ad existence check.");
+        return false;
+    };
+
+    statement
+        .exists([id])
+        .map_err(|err| {
+            error!("Error checking ad existence for {id}: {err}");
+        })
+        .unwrap_or(false)
+}
+
+pub fn clear_ad_references(ad_id: i64, db: &Connection) -> Result<usize, ChhotoError> {
+    let Ok(mut statement) = db.prepare_cached("UPDATE urls SET ad_id = NULL WHERE ad_id = ?1")
+    else {
+        error!("Error preparing SQL statement for clearing ad references.");
+        return Err(ServerError);
+    };
+
+    statement
+        .execute([ad_id])
+        .inspect_err(|err| {
+            error!("Error clearing ad references for {ad_id}: {err}");
+        })
+        .map_err(|_| ServerError)
+}
+
 pub fn insert_ad(
     name: &str,
     image_url: &str,
@@ -358,9 +429,7 @@ pub fn insert_ad(
             reason: "Ad name is already in use!".to_string(),
         }),
         Err(err) => {
-            error!(
-                "There was some error while adding ad ({name}, {image_url}, {ad_link}): {err}"
-            );
+            error!("There was some error while adding ad ({name}, {image_url}, {ad_link}): {err}");
             Err(ServerError)
         }
     }
@@ -415,6 +484,9 @@ pub fn update_ad(
 }
 
 pub fn delete_ad(id: i64, db: &Connection) -> Result<(), ChhotoError> {
+    // Reset ad references on links before deleting the ad itself
+    clear_ad_references(id, db)?;
+
     let Ok(mut statement) = db.prepare_cached("DELETE FROM ads WHERE id = ?1") else {
         error!("Error preparing SQL statement for delete_ad.");
         return Err(ServerError);
@@ -433,7 +505,7 @@ pub fn delete_ad(id: i64, db: &Connection) -> Result<(), ChhotoError> {
 
 pub fn open_db(path: &str, use_wal_mode: bool, ensure_acid: bool) -> Connection {
     // Set current user_version. Should be incremented on change of schema.
-    let user_version = 2;
+    let user_version = 3;
 
     let db = Connection::open(path).expect("Unable to open database!");
 
@@ -453,7 +525,8 @@ pub fn open_db(path: &str, use_wal_mode: bool, ensure_acid: bool) -> Connection 
             long_url TEXT NOT NULL,
             short_url TEXT NOT NULL,
             hits INTEGER NOT NULL,
-            expiry_time INTEGER NOT NULL DEFAULT 0
+            expiry_time INTEGER NOT NULL DEFAULT 0,
+            ad_id INTEGER
          )",
         // expiry_time is added later during migration 1
         [],
@@ -484,6 +557,20 @@ pub fn open_db(path: &str, use_wal_mode: bool, ensure_acid: bool) -> Connection 
             [],
         )
         .expect("Unable to apply migration 1.");
+    }
+
+    // Migration 2: Add ad_id column to urls to store optional ad references
+    if current_user_version < 3 {
+        if let Err(err) = db.execute("ALTER TABLE urls ADD COLUMN ad_id INTEGER", []) {
+            if !err.to_string().contains("duplicate column name") {
+                panic!("Unable to apply migration 2: {err}");
+            }
+        }
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_urls_ad_id ON urls (ad_id)",
+            [],
+        )
+        .expect("Unable to create index on urls ad_id.");
     }
 
     // Create index on expiry_time for faster lookups
@@ -518,6 +605,12 @@ pub fn open_db(path: &str, use_wal_mode: bool, ensure_acid: bool) -> Connection 
         [],
     )
     .expect("Unable to create index on ads expiry_time.");
+
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_urls_ad_id ON urls (ad_id)",
+        [],
+    )
+    .expect("Unable to create index on urls ad_id.");
 
     // Set the user version
     db.pragma_update(None, "user_version", user_version)

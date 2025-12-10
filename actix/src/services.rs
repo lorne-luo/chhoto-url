@@ -57,6 +57,8 @@ struct CreatedURL {
     error: bool,
     shorturl: String,
     expiry_time: i64,
+    #[serde(default)]
+    ad_id: Option<i64>,
 }
 
 // Struct for returning information about a shortlink in expand
@@ -67,6 +69,7 @@ struct LinkInfo {
     longurl: String,
     hits: i64,
     expiry_time: i64,
+    ad_id: Option<i64>,
 }
 
 // Struct for query params in /api/all
@@ -93,7 +96,7 @@ pub async fn add_link(
     // If success, add new link
     if result.success {
         match utils::add_link(&req, &data.db, config, false) {
-            Ok((shorturl, expiry_time)) => {
+            Ok((shorturl, expiry_time, ad_id)) => {
                 let site_url = config.site_url.clone();
                 let shorturl = if let Some(url) = site_url {
                     format!("{url}/{shorturl}")
@@ -111,6 +114,7 @@ pub async fn add_link(
                     error: false,
                     shorturl,
                     expiry_time,
+                    ad_id,
                 };
                 HttpResponse::Created().json(response)
             }
@@ -128,7 +132,12 @@ pub async fn add_link(
                     error: true,
                     reason,
                 };
-                HttpResponse::Conflict().json(response)
+                let status = if response.reason.contains("already in use") {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                HttpResponse::build(status).json(response)
             }
         }
     } else if result.error {
@@ -143,10 +152,17 @@ pub async fn add_link(
             return HttpResponse::Unauthorized().body("Not logged in!");
         };
         match result {
-            Ok((shorturl, _)) => HttpResponse::Created().body(shorturl),
+            Ok((shorturl, _, _)) => HttpResponse::Created().body(shorturl),
             Err(ServerError) => HttpResponse::InternalServerError()
                 .body("Something went wrong when adding the link.".to_string()),
-            Err(ClientError { reason }) => HttpResponse::Conflict().body(reason),
+            Err(ClientError { reason }) => {
+                let status = if reason.contains("already in use") {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                HttpResponse::build(status).body(reason)
+            }
         }
     }
 }
@@ -181,13 +197,14 @@ pub async fn expand(req: String, data: web::Data<AppState>, http: HttpRequest) -
     let result = auth::is_api_ok(http, &data.config);
     if result.success {
         match database::find_url(&req, &data.db) {
-            Ok((longurl, hits, expiry_time)) => {
+            Ok((longurl, hits, expiry_time, ad_id)) => {
                 let body = LinkInfo {
                     success: true,
                     error: false,
                     longurl,
                     hits,
                     expiry_time,
+                    ad_id,
                 };
                 HttpResponse::Ok().json(body)
             }

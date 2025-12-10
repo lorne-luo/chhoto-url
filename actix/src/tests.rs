@@ -23,6 +23,8 @@ struct URLData {
     longlink: String,
     hits: i64,
     expiry_time: i64,
+    #[serde(default)]
+    ad_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -35,6 +37,8 @@ struct CreatedURL {
     longurl: String,
     #[serde(default)]
     hits: i64,
+    #[serde(default)]
+    ad_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -129,9 +133,25 @@ async fn add_link<T: Service<Request, Response = ServiceResponse, Error = Error>
     shortlink: S,
     expiry_delay: i64,
 ) -> (StatusCode, CreatedURL) {
+    add_link_with_ad(app, api_key, shortlink, expiry_delay, None).await
+}
+
+async fn add_link_with_ad<
+    T: Service<Request, Response = ServiceResponse, Error = Error>,
+    S: Display,
+>(
+    app: T,
+    api_key: &str,
+    shortlink: S,
+    expiry_delay: i64,
+    ad_id: Option<i64>,
+) -> (StatusCode, CreatedURL) {
+    let ad_field = ad_id
+        .map(|id| format!(",\"ad_id\":{id}"))
+        .unwrap_or_default();
     let req = test::TestRequest::post().uri("/api/new")
         .insert_header(("X-API-Key", api_key))
-        .set_payload(format!("{{\"shortlink\":\"{shortlink}\",\"longlink\":\"https://example-{shortlink}.com\",\"expiry_delay\":{expiry_delay}}}"))
+        .set_payload(format!("{{\"shortlink\":\"{shortlink}\",\"longlink\":\"https://example-{shortlink}.com\",\"expiry_delay\":{expiry_delay}{ad_field}}}"))
         .to_request();
 
     let resp = test::call_service(&app, req).await;
@@ -166,10 +186,25 @@ async fn edit_link<T: Service<Request, Response = ServiceResponse, Error = Error
     shortlink: &str,
     reset_hits: bool,
 ) -> StatusCode {
+    edit_link_with_ad(app, api_key, shortlink, reset_hits, None).await
+}
+
+async fn edit_link_with_ad<T: Service<Request, Response = ServiceResponse, Error = Error>>(
+    app: T,
+    api_key: &str,
+    shortlink: &str,
+    reset_hits: bool,
+    ad_id: Option<Option<i64>>,
+) -> StatusCode {
+    let ad_field = match ad_id {
+        Some(Some(id)) => format!(",\"ad_id\":{id}"),
+        Some(None) => ",\"ad_id\":null".to_string(),
+        None => String::new(),
+    };
     let req = test::TestRequest::put()
         .uri("/api/edit")
         .insert_header(("X-API-Key", api_key))
-        .set_payload(format!("{{\"shortlink\":\"{shortlink}\",\"longlink\":\"https://edited-{shortlink}.com\",\"reset_hits\":{reset_hits}}}"))
+        .set_payload(format!("{{\"shortlink\":\"{shortlink}\",\"longlink\":\"https://edited-{shortlink}.com\",\"reset_hits\":{reset_hits}{ad_field}}}"))
         .to_request();
     let resp = test::call_service(&app, req).await;
     resp.status()
@@ -635,6 +670,118 @@ async fn link_editing() {
 }
 
 #[test]
+async fn link_creation_with_ad_association() {
+    let test = "link-ad-association";
+    let conf = default_config(test);
+    let app = create_app(&conf, test).await;
+    let api_key = conf.api_key.clone().unwrap();
+
+    let (ad_status, ad_body) = add_ad(&app, &api_key, "link-ad", Some(5), 0).await;
+    assert!(ad_status.is_success());
+    let ad: AdData = serde_json::from_str(&ad_body).unwrap();
+
+    let (status, created) = add_link_with_ad(&app, &api_key, "withad", 0, Some(ad.id)).await;
+    assert!(status.is_success());
+    assert_eq!(created.ad_id, Some(ad.id));
+
+    let (expand_status, expanded) = expand(&app, &api_key, "withad").await;
+    assert!(expand_status.is_success());
+    assert_eq!(expanded.ad_id, Some(ad.id));
+
+    let req = test::TestRequest::get()
+        .uri("/api/all")
+        .insert_header(("X-API-Key", api_key.clone()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let body = to_bytes(resp.into_body()).await.unwrap();
+    let rows: Rc<[URLData]> = serde_json::from_str(body.as_str()).unwrap();
+    assert_eq!(rows[0].ad_id, Some(ad.id));
+
+    let _ = fs::remove_file(format!("/tmp/chhoto-url-test-{test}.sqlite"));
+}
+
+#[test]
+async fn link_edit_updates_ad_and_handles_invalid_reference() {
+    let test = "link-edit-ad";
+    let conf = default_config(test);
+    let app = create_app(&conf, test).await;
+    let api_key = conf.api_key.clone().unwrap();
+
+    let (ad_one_status, ad_one_body) = add_ad(&app, &api_key, "ad-one", None, 0).await;
+    assert!(ad_one_status.is_success());
+    let ad_one: AdData = serde_json::from_str(&ad_one_body).unwrap();
+
+    let (ad_two_status, ad_two_body) = add_ad(&app, &api_key, "ad-two", None, 0).await;
+    assert!(ad_two_status.is_success());
+    let ad_two: AdData = serde_json::from_str(&ad_two_body).unwrap();
+
+    let (link_status, _) = add_link_with_ad(&app, &api_key, "editable", 0, Some(ad_one.id)).await;
+    assert!(link_status.is_success());
+
+    let invalid_status =
+        edit_link_with_ad(&app, &api_key, "editable", false, Some(Some(9999))).await;
+    assert_eq!(invalid_status, StatusCode::BAD_REQUEST);
+
+    let update_status =
+        edit_link_with_ad(&app, &api_key, "editable", false, Some(Some(ad_two.id))).await;
+    assert!(update_status.is_success());
+
+    let clear_status = edit_link_with_ad(&app, &api_key, "editable", false, Some(None)).await;
+    assert!(clear_status.is_success());
+
+    let (expand_status, expanded) = expand(&app, &api_key, "editable").await;
+    assert!(expand_status.is_success());
+    assert_eq!(expanded.ad_id, None);
+
+    let req = test::TestRequest::get()
+        .uri("/api/all")
+        .insert_header(("X-API-Key", api_key.clone()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let body = to_bytes(resp.into_body()).await.unwrap();
+    let rows: Rc<[URLData]> = serde_json::from_str(body.as_str()).unwrap();
+    assert_eq!(rows[0].ad_id, None);
+
+    let _ = fs::remove_file(format!("/tmp/chhoto-url-test-{test}.sqlite"));
+}
+
+#[test]
+async fn deleting_ad_clears_link_association() {
+    let test = "ad-delete-clears-links";
+    let conf = default_config(test);
+    let app = create_app(&conf, test).await;
+    let api_key = conf.api_key.clone().unwrap();
+
+    let (ad_status, ad_body) = add_ad(&app, &api_key, "transient-ad", None, 0).await;
+    assert!(ad_status.is_success());
+    let ad: AdData = serde_json::from_str(&ad_body).unwrap();
+
+    let (status, _) = add_link_with_ad(&app, &api_key, "dependent", 0, Some(ad.id)).await;
+    assert!(status.is_success());
+
+    let (delete_status, _) = delete_ad_entry(&app, &api_key, ad.id).await;
+    assert!(delete_status.is_success());
+
+    let req = test::TestRequest::get()
+        .uri("/api/all")
+        .insert_header(("X-API-Key", api_key.clone()))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    let body = to_bytes(resp.into_body()).await.unwrap();
+    let rows: Rc<[URLData]> = serde_json::from_str(body.as_str()).unwrap();
+    assert_eq!(rows[0].ad_id, None);
+
+    let (expand_status, expanded) = expand(&app, &api_key, "dependent").await;
+    assert!(expand_status.is_success());
+    assert_eq!(expanded.ad_id, None);
+
+    let _ = fs::remove_file(format!("/tmp/chhoto-url-test-{test}.sqlite"));
+}
+
+#[test]
 async fn ads_crud_and_unique_validation() {
     let test = "ads-crud";
     let conf = default_config(test);
@@ -690,8 +837,7 @@ async fn ads_countdown_validation() {
     let bad_reason: GenericResponse = serde_json::from_str(&bad_body).unwrap();
     assert!(bad_reason.reason.contains("Countdown"));
 
-    let (negative_status, negative_body) =
-        add_ad(&app, &api_key, "negative", Some(-1), 0).await;
+    let (negative_status, negative_body) = add_ad(&app, &api_key, "negative", Some(-1), 0).await;
     assert_eq!(negative_status, StatusCode::BAD_REQUEST);
     let negative_reason: GenericResponse = serde_json::from_str(&negative_body).unwrap();
     assert!(negative_reason.reason.contains("Countdown"));

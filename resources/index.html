@@ -124,6 +124,12 @@
                 <option value="31536000">1 Year</option>
               </select>
             </div>
+            <div class="pure-control-group">
+              <label for="linkAdSelect">Ad (optional)</label>
+              <select class="chhoto-select" name="linkAdSelect" id="linkAdSelect">
+                <option value="">None</option>
+              </select>
+            </div>
             <div class="pure-controls" id="controls">
               <button class="chhoto-button pure-button pure-button-primary">
                 Shorten!
@@ -156,6 +162,7 @@
               <th name="numColumn">#</th>
               <th id="short-url-header">Short URL</th>
               <th>Long URL</th>
+              <th name="adColumn">Ad</th>
               <th name="hitsColumn">Hits</th>
               <th name="expiryColumn">Expiry</th>
               <th name="actions">Actions</th>
@@ -288,6 +295,10 @@
             <input type="checkbox" id="edit-checkbox" checked="unchecked" />
             Reset hit count
           </label>
+          <label for="editLinkAdSelect">Ad (optional)</label>
+          <select class="chhoto-select" id="editLinkAdSelect">
+            <option value="">None</option>
+          </select>
           <button
             class="chhoto-button pure-button pure-button-primary"
             id="edit-cancel-button"

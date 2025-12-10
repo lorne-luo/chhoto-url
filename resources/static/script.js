@@ -10,8 +10,10 @@ let ADMIN = false;
 let LOCAL_DATA = [];
 let CUR_PAGE = 0;
 let ADS_DATA = [];
+let SELECTABLE_ADS = [];
 let ACTIVE_TAB = "links";
 let EDITING_AD_ID = null;
+let EDITING_LINK_AD_ID = null;
 
 // Flags
 let PROCESSING_PAGE_TRANSITION = true;
@@ -42,6 +44,81 @@ const UNITS = {
   hour: 3600000,
   minute: 60000,
   second: 1000,
+};
+
+const findAdNameById = (id) => {
+  const combinedAds = [...SELECTABLE_ADS, ...ADS_DATA];
+  const ad = combinedAds.find((item) => item.id === id);
+  return ad ? ad.name : null;
+};
+
+const formatAdLabel = (adId) => {
+  if (adId === null || adId === undefined) {
+    return "-";
+  }
+  const adName = findAdNameById(adId);
+  if (adName) {
+    return `${adName} (#${adId})`;
+  }
+  return `Ad #${adId}`;
+};
+
+const renderAdSelectOptions = (select, currentValue = null) => {
+  if (!select) {
+    return;
+  }
+  const previous = currentValue ?? select.value ?? "";
+  select.innerHTML = "";
+
+  const noneOpt = document.createElement("option");
+  noneOpt.value = "";
+  noneOpt.text = "None";
+  select.appendChild(noneOpt);
+
+  SELECTABLE_ADS.forEach((ad) => {
+    const opt = document.createElement("option");
+    opt.value = ad.id;
+    opt.text = `${ad.name} (#${ad.id})`;
+    select.appendChild(opt);
+  });
+
+  if (previous) {
+    const exists = Array.from(select.options).some(
+      (opt) => String(opt.value) === String(previous),
+    );
+    if (!exists) {
+      const opt = document.createElement("option");
+      opt.value = previous;
+      opt.text = `Ad #${previous} (inactive)`;
+      select.appendChild(opt);
+    }
+    select.value = previous;
+  } else {
+    select.value = "";
+  }
+};
+
+const populateAdSelects = () => {
+  renderAdSelectOptions(document.getElementById("linkAdSelect"));
+  renderAdSelectOptions(document.getElementById("editLinkAdSelect"), EDITING_LINK_AD_ID);
+};
+
+const refreshSelectableAds = async () => {
+  try {
+    const res = await fetch(prepSubdir("/api/ads/selectable"), { cache: "no-cache" });
+    if (res.status === 401) {
+      showLogin();
+      return;
+    }
+    if (!res.ok) {
+      throw new Error("Unable to fetch selectable ads.");
+    }
+    SELECTABLE_ADS = await res.json();
+    populateAdSelects();
+    displayData();
+  } catch (err) {
+    console.log("Error while loading selectable ads:", err);
+  }
 };
 
 const prepSubdir = (link) => {
@@ -150,6 +227,9 @@ const refreshData = async () => {
     }
     showVersion();
     if (ADMIN) {
+      if (SELECTABLE_ADS.length === 0) {
+        await refreshSelectableAds();
+      }
       const params = new URLSearchParams();
       if (LOCAL_DATA.length == 0) {
         params.append("page_size", "20");
@@ -356,6 +436,10 @@ const TR = (i, row) => {
   const shortTD = TD(A_SHORT(shortlink), "Short URL");
   shortTD.setAttribute("name", "shortColumn");
 
+  const adLabel = formatAdLabel(row["ad_id"]);
+  const adTD = TD(adLabel, "Ad");
+  adTD.setAttribute("name", "adColumn");
+
   const hitsTD = TD(row["hits"], null);
   hitsTD.setAttribute("label", "Hits");
   hitsTD.setAttribute("name", "hitsColumn");
@@ -391,11 +475,11 @@ const TR = (i, row) => {
   btnGrp.role = "group";
   btnGrp.appendChild(copyButton(shortlink));
   btnGrp.appendChild(qrCodeButton(shortlink));
-  btnGrp.appendChild(editButton(shortlink, longlink));
+  btnGrp.appendChild(editButton(shortlink, longlink, row["ad_id"]));
   btnGrp.appendChild(deleteButton(shortlink));
   actionsTD.appendChild(btnGrp);
 
-  for (const td of [numTD, shortTD, longTD, hitsTD, expiryTD, actionsTD]) {
+  for (const td of [numTD, shortTD, longTD, adTD, hitsTD, expiryTD, actionsTD]) {
     tr.appendChild(td);
   }
   return tr;
@@ -444,7 +528,7 @@ const copyButton = (shortUrl) => {
   return btn;
 };
 
-const editButton = (shortUrl, longUrl) => {
+const editButton = (shortUrl, longUrl, adId) => {
   const btn = document.createElement("button");
   btn.classList.add("svg-button");
   btn.innerHTML = SVG_EDIT_BUTTON;
@@ -460,6 +544,11 @@ const editButton = (shortUrl, longUrl) => {
       document.getElementById("edit-checkbox").checked = false;
       editedUrl.value = longUrl;
     }
+    EDITING_LINK_AD_ID = adId ?? null;
+    renderAdSelectOptions(
+      document.getElementById("editLinkAdSelect"),
+      EDITING_LINK_AD_ID,
+    );
     editedUrl.focus();
   };
   return btn;
@@ -645,6 +734,7 @@ const refreshAds = async () => {
     }
     ADS_DATA = await res.json();
     displayAds();
+    await refreshSelectableAds();
   } catch (err) {
     console.log("Error while loading ads:", err);
     showAdsAlert(
@@ -779,6 +869,7 @@ const submitAdForm = () => {
       document.forms.namedItem("ad-form").reset();
       document.getElementById("adCountdownSeconds").value = 5;
       showAdsAlert("Ad saved!", "light-dark(green, #1e501e)");
+      refreshSelectableAds();
     })
     .catch((err) => {
       console.log("Error:", err);
@@ -838,6 +929,7 @@ const submitAdEdit = () => {
       document.getElementById("container").style.filter = "blur(0px)";
       showAdsAlert("Ad updated.", "light-dark(green, #1e501e)");
       EDITING_AD_ID = null;
+      refreshSelectableAds();
     })
     .catch((err) => {
       console.log("Error:", err);
@@ -864,6 +956,7 @@ const deleteAdById = (id) => {
       }
       ADS_DATA = ADS_DATA.filter((item) => item.id !== id);
       displayAds();
+      refreshSelectableAds();
     })
     .catch((err) => {
       console.log("Error:", err);
@@ -879,11 +972,15 @@ const submitForm = () => {
   const longUrl = form.elements["longUrl"];
   const shortUrl = form.elements["shortUrl"];
   const expiryDelay = form.elements["expiryDelay"];
+  const adSelect = form.elements["linkAdSelect"];
   const data = {
     longlink: longUrl.value,
     shortlink: shortUrl.value,
     expiry_delay: parseInt(expiryDelay.value),
   };
+  if (adSelect) {
+    data.ad_id = adSelect.value === "" ? null : parseInt(adSelect.value);
+  }
 
   const url = prepSubdir("/api/new");
   let ok = false;
@@ -908,6 +1005,9 @@ const submitForm = () => {
         longUrl.value = "";
         shortUrl.value = "";
         expiryDelay.value = 0;
+        if (adSelect) {
+          adSelect.value = "";
+        }
         const params = new URLSearchParams();
         params.append("page_size", 1);
         const newEntry = await pullData(params);
@@ -935,12 +1035,16 @@ const submitEdit = () => {
   const longUrl = urlInput.value;
   const shortUrl = editUrlSpan.textContent;
   const checkBox = document.getElementById("edit-checkbox");
+  const adSelect = document.getElementById("editLinkAdSelect");
   if (confirm("Are you sure that you want to edit " + shortUrl + "?")) {
     data = {
       shortlink: shortUrl,
       longlink: longUrl,
       reset_hits: checkBox.checked,
     };
+    if (adSelect) {
+      data.ad_id = adSelect.value === "" ? null : parseInt(adSelect.value);
+    }
     const url = prepSubdir("/api/edit");
     let ok = false;
 
@@ -969,6 +1073,8 @@ const submitEdit = () => {
           if (checkBox.checked) {
             LOCAL_DATA[editedIndex]["hits"] = 0;
           }
+          LOCAL_DATA[editedIndex]["ad_id"] =
+            adSelect && adSelect.value !== "" ? parseInt(adSelect.value) : null;
           checkBox.checked = false;
         }
         displayData();
@@ -1031,6 +1137,7 @@ const logOut = async () => {
           VERSION = null;
           LOCAL_DATA = [];
           ADS_DATA = [];
+        SELECTABLE_ADS = [];
           ACTIVE_TAB = "links";
           await refreshData();
         } else {
@@ -1115,6 +1222,7 @@ refreshData()
     const editDialog = document.getElementById("edit-dialog");
     editDialog.onclose = () => {
       document.getElementById("container").style.filter = "blur(0px)";
+      EDITING_LINK_AD_ID = null;
     };
     document.forms.namedItem("edit-form").onsubmit = (e) => {
       e.preventDefault();

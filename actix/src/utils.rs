@@ -7,7 +7,7 @@ use nanoid::nanoid;
 use rand::seq::IndexedRandom;
 use regex::Regex;
 use rusqlite::Connection;
-use serde::Deserialize;
+use serde::{de::Deserializer, Deserialize};
 
 use crate::{
     config::Config,
@@ -26,6 +26,8 @@ struct NewURLRequest {
     longlink: String,
     #[serde(default)]
     expiry_delay: i64,
+    #[serde(default)]
+    ad_id: Option<i64>,
 }
 
 // Struct for reading link pairs sent during API call for editing link
@@ -34,6 +36,15 @@ struct EditURLRequest {
     shortlink: String,
     longlink: String,
     reset_hits: bool,
+    #[serde(default, deserialize_with = "deserialize_optional_ad_id")]
+    ad_id: Option<Option<i64>>,
+}
+
+fn deserialize_optional_ad_id<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::<i64>::deserialize(deserializer)?))
 }
 
 #[derive(Deserialize)]
@@ -72,7 +83,7 @@ pub fn add_link(
     db: &Connection,
     config: &Config,
     using_public_mode: bool,
-) -> Result<(String, i64), ChhotoError> {
+) -> Result<(String, i64, Option<i64>), ChhotoError> {
     // Ok : shortlink, expiry_time
     let mut chunks: NewURLRequest;
     if let Ok(json) = serde_json::from_str(req) {
@@ -107,8 +118,22 @@ pub fn add_link(
     chunks.expiry_delay = chunks.expiry_delay.max(0);
 
     if !shortlink_provided || is_link_valid(chunks.shortlink.as_str(), allow_capital_letters) {
-        match database::add_link(&chunks.shortlink, &chunks.longlink, chunks.expiry_delay, db) {
-            Ok(expiry_time) => Ok((chunks.shortlink, expiry_time)),
+        if let Some(ad_id) = chunks.ad_id {
+            if ad_id <= 0 || !database::ad_exists(ad_id, db) {
+                return Err(ClientError {
+                    reason: "Invalid ad id.".to_string(),
+                });
+            }
+        }
+
+        match database::add_link(
+            &chunks.shortlink,
+            &chunks.longlink,
+            chunks.expiry_delay,
+            chunks.ad_id,
+            db,
+        ) {
+            Ok(expiry_time) => Ok((chunks.shortlink, expiry_time, chunks.ad_id)),
             Err(ClientError { reason }) => {
                 if shortlink_provided {
                     Err(ClientError { reason })
@@ -124,9 +149,10 @@ pub fn add_link(
                         &chunks.shortlink,
                         &chunks.longlink,
                         chunks.expiry_delay,
+                        chunks.ad_id,
                         db,
                     ) {
-                        Ok(expiry_time) => Ok((chunks.shortlink, expiry_time)),
+                        Ok(expiry_time) => Ok((chunks.shortlink, expiry_time, chunks.ad_id)),
                         Err(_) => {
                             error!("Something went wrong while adding a generated link.");
                             Err(ServerError)
@@ -158,7 +184,20 @@ pub fn edit_link(req: &str, db: &Connection, config: &Config) -> Result<(), Chho
             reason: "Invalid shortlink!".to_string(),
         });
     }
-    let result = database::edit_link(&chunks.shortlink, &chunks.longlink, chunks.reset_hits, db);
+    if let Some(Some(ad_id)) = chunks.ad_id {
+        if ad_id <= 0 || !database::ad_exists(ad_id, db) {
+            return Err(ClientError {
+                reason: "Invalid ad id.".to_string(),
+            });
+        }
+    }
+    let result = database::edit_link(
+        &chunks.shortlink,
+        &chunks.longlink,
+        chunks.reset_hits,
+        chunks.ad_id,
+        db,
+    );
     match result {
         // Zero rows returned means no updates
         Ok(0) => Err(ClientError {
@@ -184,10 +223,9 @@ pub fn delete_link(
 }
 
 pub fn create_ad(req: &str, db: &Connection) -> Result<AdRow, ChhotoError> {
-    let chunks: AdRequest =
-        serde_json::from_str(req).map_err(|_| ClientError {
-            reason: "Invalid request!".to_string(),
-        })?;
+    let chunks: AdRequest = serde_json::from_str(req).map_err(|_| ClientError {
+        reason: "Invalid request!".to_string(),
+    })?;
 
     let validated = validate_ad_payload(chunks)?;
     database::insert_ad(
@@ -206,10 +244,9 @@ pub fn edit_ad(id: i64, req: &str, db: &Connection) -> Result<AdRow, ChhotoError
             reason: "Invalid ad id.".to_string(),
         });
     }
-    let chunks: AdRequest =
-        serde_json::from_str(req).map_err(|_| ClientError {
-            reason: "Invalid request!".to_string(),
-        })?;
+    let chunks: AdRequest = serde_json::from_str(req).map_err(|_| ClientError {
+        reason: "Invalid request!".to_string(),
+    })?;
 
     let validated = validate_ad_payload(chunks)?;
     database::update_ad(
