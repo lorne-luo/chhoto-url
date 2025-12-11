@@ -11,11 +11,11 @@ use crate::services::ChhotoError::{self, ClientError, ServerError};
 // Struct for encoding a DB row
 #[derive(Serialize)]
 pub struct DBRow {
-    shortlink: String,
-    longlink: String,
-    hits: i64,
-    expiry_time: i64,
-    ad_id: Option<i64>,
+    pub shortlink: String,
+    pub longlink: String,
+    pub hits: i64,
+    pub expiry_time: i64,
+    pub ad_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -130,19 +130,27 @@ pub fn getall(
 }
 
 // Add a hit when site is visited during link resolution
-pub fn find_and_add_hit(shortlink: &str, db: &Connection) -> Result<String, ()> {
+pub fn find_and_add_hit(shortlink: &str, db: &Connection) -> Result<DBRow, ()> {
     let now = chrono::Utc::now().timestamp();
     let Ok(mut statement) = db.prepare_cached(
         "UPDATE urls 
              SET hits = hits + 1 
              WHERE short_url = ?1 AND (expiry_time = 0 OR expiry_time > ?2)
-             RETURNING long_url",
+             RETURNING short_url, long_url, hits, expiry_time, ad_id",
     ) else {
         error!("Error preparing SQL statement for add_hit.");
         return Err(());
     };
     statement
-        .query_one((shortlink, now), |row| row.get("long_url"))
+        .query_one((shortlink, now), |row| {
+            Ok(DBRow {
+                shortlink: row.get("short_url")?,
+                longlink: row.get("long_url")?,
+                hits: row.get("hits")?,
+                expiry_time: row.get("expiry_time")?,
+                ad_id: row.get("ad_id")?,
+            })
+        })
         .map_err(|_| ())
 }
 

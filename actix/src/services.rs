@@ -352,7 +352,8 @@ pub async fn link_handler(
     data: web::Data<AppState>,
 ) -> impl Responder {
     let shortlink_str = shortlink.as_str();
-    if let Ok(longlink) = database::find_and_add_hit(shortlink_str, &data.db) {
+    if let Ok(row) = database::find_and_add_hit(shortlink_str, &data.db) {
+        let longlink = row.longlink;
         if data.config.use_temp_redirect {
             Either::Left(Redirect::to(longlink))
         } else {
