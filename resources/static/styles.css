@@ -41,6 +41,19 @@ body {
   box-shadow: light-dark(#dddddd, #2b2f31) 0 0.1em 0.2em inset;
 }
 
+/* Ad (optional) selects: force black background + white text */
+#linkAdSelect,
+#editLinkAdSelect {
+  background-color: #2b2a33;
+  color: #fff;
+  color-scheme: dark;
+}
+#linkAdSelect option,
+#editLinkAdSelect option {
+  background-color: #2b2a33;
+  color: #fff;
+}
+
 ::placeholder {
   color: light-dark(#757575, #636061);
 }

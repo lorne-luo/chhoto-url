@@ -1,0 +1,101 @@
+<!-- SPDX-FileCopyrightText: 2023 Sayantan Santra <sayantan.santra689@gmail.com> -->
+<!-- SPDX-License-Identifier: MIT -->
+
+<!doctype html>
+<html>
+  <head>
+    <title>Redirecting...</title>
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0"
+    />
+    <link rel="stylesheet" type="text/css" target="_blank" href="styles.css" />
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Montserrat&display=swap");
+      :root {
+        color-scheme: light dark;
+        font-family: Montserrat, "Open Sans", Helvetica, Arial, sans-serif;
+      }
+      body {
+        color: light-dark(black, #e8e6e3);
+        background-color: light-dark(white, #181a1b);
+        text-align: center;
+        margin: 0;
+        padding: 2.5rem 1.25rem;
+        line-height: 1.5;
+      }
+      .card {
+        display: inline-block;
+        max-width: 640px;
+        text-align: left;
+        padding: 1.5rem;
+        border: 1px solid light-dark(#ddd, #303235);
+        border-radius: 12px;
+        background-color: light-dark(#fafafa, #202325);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      }
+      h1 {
+        margin-top: 0;
+        margin-bottom: 0.25rem;
+        font-size: 1.5rem;
+      }
+      #target-url {
+        word-break: break-all;
+        display: inline-block;
+      }
+      #countdown {
+        font-weight: 600;
+      }
+      a {
+        color: #0070f3;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="card">
+      <h1>Redirecting you...</h1>
+      <p>
+        You will be redirected to:
+        <span id="target-url">{{TARGET_URL}}</span>
+      </p>
+      <p>Redirecting in <span id="countdown">{{COUNTDOWN_SECONDS}}</span> seconds.</p>
+      <p>If the redirect does not start, <a id="manual-link" href="{{TARGET_URL}}">click here</a>.</p>
+    </div>
+
+    <script>
+      (function () {
+        const targetEl = document.getElementById("target-url");
+        const targetUrl = targetEl.textContent.trim();
+
+        if (!targetUrl || targetUrl === "{{TARGET_URL}}") {
+          return;
+        }
+
+        const countdownEl = document.getElementById("countdown");
+        const parsed = parseInt(countdownEl.textContent.trim(), 10);
+        let remaining = Number.isFinite(parsed) ? parsed : 5;
+        if (remaining < 0) remaining = 0;
+
+        const manualLink = document.getElementById("manual-link");
+        if (manualLink) manualLink.href = targetUrl;
+
+        const intervalId = setInterval(() => {
+          remaining -= 1;
+          countdownEl.textContent = remaining.toString();
+
+          if (remaining <= 0) {
+            clearInterval(intervalId);
+            window.location.assign(targetUrl);
+          }
+        }, 1000);
+      })();
+    </script>
+  </body>
+</html>

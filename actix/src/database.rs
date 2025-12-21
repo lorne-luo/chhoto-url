@@ -375,6 +375,32 @@ pub fn list_active_ads(db: &Connection) -> Rc<[AdRow]> {
     })
 }
 
+pub fn find_ad_by_id(id: i64, db: &Connection) -> Result<AdRow, ChhotoError> {
+    let Ok(mut statement) = db.prepare_cached(
+        "SELECT id, name, image_url, ad_link, expiry_time, countdown_seconds
+         FROM ads
+         WHERE id = ?1 LIMIT 1",
+    ) else {
+        error!("Error preparing SQL statement for find_ad_by_id.");
+        return Err(ServerError);
+    };
+
+    statement
+        .query_row([id], |row| {
+            Ok(AdRow {
+                id: row.get("id")?,
+                name: row.get("name")?,
+                image_url: row.get("image_url")?,
+                ad_link: row.get("ad_link")?,
+                expiry_time: row.get("expiry_time")?,
+                countdown_seconds: row.get("countdown_seconds")?,
+            })
+        })
+        .map_err(|_| ChhotoError::ClientError {
+            reason: "The ad does not exist on the server!".to_string(),
+        })
+}
+
 pub fn ad_exists(id: i64, db: &Connection) -> bool {
     let Ok(mut statement) = db.prepare_cached("SELECT 1 FROM ads WHERE id = ?1 LIMIT 1") else {
         error!("Error preparing SQL statement for ad existence check.");

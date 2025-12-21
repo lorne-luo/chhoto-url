@@ -8,7 +8,7 @@ use actix_web::{
     http::StatusCode,
     post, put,
     web::{self, Redirect},
-    Either, HttpRequest, HttpResponse, Responder,
+    HttpRequest, HttpResponse, Responder,
 };
 use argon2::{password_hash::PasswordHash, Argon2, PasswordVerifier};
 use log::{debug, info, warn};
@@ -350,23 +350,67 @@ pub async fn error404() -> impl Responder {
 pub async fn link_handler(
     shortlink: web::Path<String>,
     data: web::Data<AppState>,
-) -> impl Responder {
+    req: HttpRequest,
+) -> HttpResponse {
+    fn escape_html(s: &str) -> String {
+        // Minimal escaping for safe HTML text/attribute injection.
+        // (Prevents breaking attributes and mitigates XSS.)
+        let mut out = String::with_capacity(s.len());
+        for ch in s.chars() {
+            match ch {
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '"' => out.push_str("&quot;"),
+                '\'' => out.push_str("&#39;"),
+                _ => out.push(ch),
+            }
+        }
+        out
+    }
+
     let shortlink_str = shortlink.as_str();
     if let Ok(row) = database::find_and_add_hit(shortlink_str, &data.db) {
         let longlink = row.longlink;
+
+        if let Some(ad_id) = row.ad_id {
+            if let Ok(ad) = database::find_ad_by_id(ad_id, &data.db) {
+                // 使用println!宏打印ad结构体，方便debug
+                
+                if let Ok(html) = std::fs::read_to_string("./resources/static/redirect.html") {
+                    let escaped_longlink = escape_html(&longlink);
+                    let body = html
+                        .replace("{{TARGET_URL}}", &escaped_longlink)
+                        .replace("{{COUNTDOWN_SECONDS}}", &ad.countdown_seconds.to_string());
+                    return HttpResponse::Ok()
+                        .content_type("text/html; charset=utf-8")
+                        .body(body);
+                }
+            }
+        }
+
+        // Preserve previous behavior:
+        // - temp redirect: 302 (Redirect::to)
+        // - permanent redirect: 301 (Redirect::to(...).permanent())
         if data.config.use_temp_redirect {
-            Either::Left(Redirect::to(longlink))
+            Redirect::to(longlink)
+                .respond_to(&req)
+                .map_into_boxed_body()
         } else {
-            // Defaults to permanent redirection
-            Either::Left(Redirect::to(longlink).permanent())
+            Redirect::to(longlink)
+                .permanent()
+                .respond_to(&req)
+                .map_into_boxed_body()
         }
     } else {
-        Either::Right(
-            NamedFile::open_async("./resources/static/404.html")
-                .await
+        match NamedFile::open_async("./resources/static/404.html").await {
+            Ok(file) => file
                 .customize()
-                .with_status(StatusCode::NOT_FOUND),
-        )
+                .with_status(StatusCode::NOT_FOUND)
+                .respond_to(&req)
+                .map_into_boxed_body(),
+            Err(_) => HttpResponse::NotFound().body("404 Not Found"),
+        }
     }
 }
 
