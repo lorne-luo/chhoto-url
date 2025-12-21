@@ -189,6 +189,9 @@ const refreshData = async () => {
         switch (role) {
           case "nobody":
             showLogin();
+            if (adsTab) {
+              adsTab.hidden = false;
+            }
             break;
           case "public":
             await getConfig();
@@ -204,20 +207,12 @@ const refreshData = async () => {
             admin_button.innerText = "login";
             admin_button.hidden = false;
             updateInputBox();
-            if (adsTab) {
-              adsTab.hidden = true;
-            }
-            if (adsSection) {
-              adsSection.hidden = true;
-            }
+            
             ACTIVE_TAB = "links";
             break;
           case "admin":
             ADMIN = true;
             await getConfig();
-            if (adsTab) {
-              adsTab.hidden = false;
-            }
             break;
           default:
             throw Error("Got undefined user role.");
@@ -258,9 +253,7 @@ const refreshData = async () => {
       document.getElementById("table-box").hidden = true;
       loading_text.hidden = false;
       document.getElementById("url-table").innerHTML = "";
-      if (adsTab) {
-        adsTab.hidden = true;
-      }
+      
       if (adsSection) {
         adsSection.hidden = true;
       }
