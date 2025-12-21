@@ -3,7 +3,10 @@
 
 services:
   chhoto-url:
-    image: sintan1729/chhoto-url:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # image: sintan1729/chhoto-url:latest
     # You may want to check out the alpine images for extra features. The images can also be
     # pulled from ghcr.io
     restart: unless-stopped
@@ -42,26 +45,26 @@ services:
       # site_url="https://www.example.com"   incorrect
       # site_url=https://www.example.com     correct
       # This is important to ensure Chhoto URL outputs the shortened link with the correct URL.
-      # - site_url=https://www.example.com
+      - site_url=https://luotao.net
 
       # If you want to provided hashed password and API Key, uncomment the next line. Read the README
       # for instructions for the hashing. Make sure to escape $ by $$.
-      # - hash_algorithm=Argon2
+      - hash_algorithm=Argon2
 
       # Change this if you are running Chhoto URL on a port which is not 4567.
       # This is important to ensure Chhoto URL outputs the shortened link with the correct port.
-      # - port=4567
+      - port=4567
 
-      - password=TopSecretPass
+      - password=$$argon2i$$v=19$$m=16,t=2,p=1$$bHVvdGFvMTExNg$$LX2ErJQdGUrdFoX0cHC+YA
 
       # This needs to be set in order to use programs that use the JSON interface of Chhoto URL.
       # You will get a warning if this is insecure, and a generated value will be output
       # You may use that value if you can't think of a secure key
-      # - api_key=SECURE_API_KEY
+      - api_key=ead939eacbcf32
 
       # Pass the redirect method, if needed. TEMPORARY and PERMANENT
       # are accepted values, defaults to PERMANENT.
-      # - redirect_method=TEMPORARY
+      - redirect_method=TEMPORARY
 
       # By default, the auto-generated pairs are adjective-name pairs.
       # If you want UIDs, please change slug_style to UID.
@@ -73,11 +76,11 @@ services:
       # - try_longer_slug=False
       # If you want to use capital letters in the shortlink, change the following to
       # True. This will also allow capital letters in UID slugs, if it is enabled.
-      # - allow_capital_letters=False
+      - allow_capital_letters=False
 
       # In case you want to provide public access to adding links (and not
       # delete, or listing), change the following option to Enable.
-      # - public_mode=Disable
+      - public_mode=Disable
       # Additionally, it's possible to force an expiry delay in public mode.
       # The user can still choose a shorter expiry delay. The input must be in seconds.
       # It defaults to 0 i.e. no expiry.

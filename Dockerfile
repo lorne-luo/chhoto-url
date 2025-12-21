@@ -10,7 +10,7 @@ COPY ./actix/src ./src
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
-ARG target=x86_64-unknown-linux-musl
+ARG target=aarch64-unknown-linux-musl
 RUN apt-get update && apt-get install -y musl-tools
 RUN rustup target add $target
 

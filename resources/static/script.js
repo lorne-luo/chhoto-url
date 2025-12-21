@@ -681,23 +681,23 @@ const switchTab = async (tab) => {
   if (adsSection) {
     adsSection.hidden = tab !== "ads";
   }
-  if (tab === "ads") {
-    if (!ADMIN) {
-      showLogin();
-      ACTIVE_TAB = "links";
-      if (linksSection) {
-        linksSection.hidden = false;
-      }
-      if (linksTab) {
-        linksTab.classList.add("pure-button-primary");
-        linksTab.classList.add("chhoto-button");
-      }
-      if (adsTab) {
-        adsTab.classList.remove("pure-button-primary");
-        adsTab.classList.remove("chhoto-button");
-      }
-      return;
+  if (!ADMIN) {
+    showLogin();
+    ACTIVE_TAB = "links";
+    if (linksSection) {
+      linksSection.hidden = false;
     }
+    if (linksTab) {
+      linksTab.classList.add("pure-button-primary");
+      linksTab.classList.add("chhoto-button");
+    }
+    if (adsTab) {
+      adsTab.classList.remove("pure-button-primary");
+      adsTab.classList.remove("chhoto-button");
+    }
+    return;
+  }
+  if (tab === "ads") {
     await refreshAds();
   } else {
     displayData();
@@ -1029,7 +1029,7 @@ const submitForm = () => {
     })
     .catch((err) => {
       console.log("Error:", err);
-      if (!alert("Something went wrong! Click Ok to refresh page.")) {
+      if (!alert("Something went wrong from submitForm! Click Ok to refresh page.")) {
         window.location.reload();
       }
     });
@@ -1087,7 +1087,7 @@ const submitEdit = () => {
       })
       .catch((err) => {
         console.log("Error:", err);
-        if (!alert("Something went wrong! Click Ok to refresh page.")) {
+        if (!alert("Something went wrong from submitEdit! Click Ok to refresh page.")) {
           window.location.reload();
         }
       });
@@ -1122,7 +1122,7 @@ const submitLogin = () => {
     })
     .catch((err) => {
       console.log("Error:", err);
-      if (!alert("Something went wrong! Click Ok to refresh page.")) {
+      if (!alert("Something went wrong from submitLogin! Click Ok to refresh page.")) {
         window.location.reload();
       }
     });
@@ -1155,7 +1155,7 @@ const logOut = async () => {
       })
       .catch((err) => {
         console.log("Error:", err);
-        if (!alert("Something went wrong! Click Ok to refresh page.")) {
+        if (!alert("Something went wrong! Click Ok to refresh page.5")) {
           window.location.reload();
         }
       });
@@ -1218,11 +1218,15 @@ refreshData()
 
     document.getElementById("links-tab").onclick = async (e) => {
       e.preventDefault();
-      await switchTab("links");
+      if (ADMIN) {
+        await switchTab("links");
+      }
     };
     document.getElementById("ads-tab").onclick = async (e) => {
       e.preventDefault();
-      await switchTab("ads");
+      if (ADMIN) {
+        await switchTab("ads");
+      }
     };
 
     const editDialog = document.getElementById("edit-dialog");
@@ -1279,7 +1283,7 @@ refreshData()
   })
   .catch((err) => {
     console.log("Something went wrong:", err);
-    if (!alert("Something went wrong! Click Ok to refresh page.")) {
+    if (!alert("Something went wrong from refreshData! Click Ok to refresh page.")) {
       window.location.reload();
     }
   });
