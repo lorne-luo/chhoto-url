@@ -87,11 +87,11 @@ services:
       # - public_mode_expiry_delay=3600
       # In case you want to completely disable the frontend, change the following
       # to True.
-      # - disable_frontend=False
+      - disable_frontend=False
       # If you want to serve a custom landing page, put all your site related files, along with an
       # index.html file in a directory, and set the following to the path of the directory. Remember to first
       # mount the directory inside the container. The admin page will then be located at /admin/manage.
-      # - custom_landing_directory=/custom/dir/location
+      - custom_landing_directory=/data/landing
 
       # By default, the server sends no Cache-Control headers. You can supply a
       # comma separated list of valid header as per RFC 7234 §5.2 to send those
@@ -101,6 +101,7 @@ services:
       # You may set the TZ variable for timezone in logging, but it will only work in the alpine builds
     volumes:
       - db:/db
+      - ./landing:/data/landing
     # Only enable this if using the alpine images.
     # healthcheck:
     #   test: wget --no-verbose --tries=1 --spider http://chhoto-url:4567/api/whoami || exit 1
