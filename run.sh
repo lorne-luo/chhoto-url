@@ -1,2 +1,4 @@
-cargo build --release --locked --manifest-path actix/Cargo.toml
-cargo run --manifest-path actix/Cargo.toml
+docker compose down
+docker rmi chhoto-url-chhoto-url
+docker compose up -d
+

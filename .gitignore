@@ -1,3 +1,4 @@
+*.sqlite
 # Ignore build outputs
 actix/target
 resources-final
